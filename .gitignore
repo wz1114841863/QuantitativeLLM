@@ -1,0 +1,11 @@
+# envs
+.venv/*
+venv/*
+llm/*
+.vscode/*
+
+# tmp files
+tmp/*
+
+# output files
+output/*
