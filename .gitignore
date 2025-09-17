@@ -6,6 +6,10 @@ llm/*
 
 # tmp files
 tmp/*
+*.egg-info/*
 
 # output files
 output/*
+__pycache__/*
+*.pyc
+*.pyo
