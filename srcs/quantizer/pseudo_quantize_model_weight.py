@@ -1,6 +1,25 @@
 import torch
 
 
+@torch.no_grad()
+def pseudo_symm_quantize_to_4bit(tensor):
+    """
+    Symmetric INT quantization to 4 bits, pseudo-quantization.
+    """
+    original_device = tensor.device
+    original_dtype = tensor.dtype
+    tensor_cpu = tensor.cpu().float()
+    max_abs_val = torch.max(torch.abs(tensor_cpu))
+    scale = max_abs_val / 7.0 if max_abs_val != 0 else 1.0
+
+    quantized_int = torch.round(tensor_cpu / scale).clamp(-7, 7).to(torch.int8)
+    quantized_float = quantized_int.float()
+    quantized_float = quantized_float.to(device=original_device, dtype=original_dtype)
+
+    return quantized_float, scale.item()
+
+
+@torch.no_grad()
 def pseudo_quantize_to_4bit(tensor):
     """Zero-point quantization to 4 bits.
     e.g.:
@@ -16,6 +35,7 @@ def pseudo_quantize_to_4bit(tensor):
     return quantized, scale.item(), zero_point.item()
 
 
+@torch.no_grad()
 def pseudo_group_quantize_to_4bit(tensor, group_size=128):
     """
     伪量化, 分组量化到4位
