@@ -3,7 +3,7 @@ import torch
 from transformers import OPTConfig, OPTModel
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 
-from quantizer.pseudo_quantize_model_weight import (
+from srcs.quantizer.pseudo_quantize import (
     pseudo_symm_quantize_to_4bit,
 )
 from utils.perplexity import calc_perplexity_wikitext
