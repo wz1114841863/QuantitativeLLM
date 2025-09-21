@@ -12,7 +12,6 @@ from utils.perplexity import calc_perplexity_wikitext
 def test_opt_perplexity(model_name, out_dir="./output/"):
     """Test the perplexity of an OPT model."""
     print(f"Loading model {model_name}...")
-    # 目前还是针对OPT模型, 后续需要验证其他模型
     config = AutoConfig.from_pretrained(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name)

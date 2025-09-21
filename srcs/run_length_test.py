@@ -1,5 +1,6 @@
 import torch
 import os
+import gc
 
 from collections import defaultdict
 from collections import Counter
@@ -14,6 +15,16 @@ from srcs.utils.utils import (
 )
 
 
+def release_memory():
+    """aggressive but safe for both CUDA & CPU"""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    # 如果用了 mps(Mac)
+    if hasattr(torch, "mps") and torch.mps.is_available():
+        torch.mps.empty_cache()
+
+
 def analyze_model(model_name, out_dir, skip_if_exist=True):
     """Analyze a model: quantize weights, compute run-length stats, and save results."""
 
@@ -23,9 +34,9 @@ def analyze_model(model_name, out_dir, skip_if_exist=True):
     group_size = 128
     strategies = [
         ("real_symm", False, None),
-        ("real_zero_point", True, None),
-        ("group_symm", False, group_size),
-        ("group_zero_point", True, group_size),
+        # ("real_zero_point", True, None),
+        # ("group_symm", False, group_size),
+        # ("group_zero_point", True, group_size),
     ]
     print(f"Loading model {model_name}...")
     # 目前还是针对OPT模型, 后续需要验证其他模型
@@ -78,17 +89,24 @@ def analyze_model(model_name, out_dir, skip_if_exist=True):
                 print(line)
                 log_lines.append(line)
 
+                # 释放内存
+                del weight, quantized, runs, len_counter, zero_runs
+                release_memory()
+
         # 落盘
         # save_quantized_weigths(quantized_dict, weight_path)
-        save_json_file(dict(global_rl_counter), global_rl_path)
-        save_json_file(layer_rl_dict, layer_rl_path)
-        save_json_file(zero_ratio_dict, zero_ratio_path)
-        with open(log_path, "w") as f:
-            f.write("\n".join(log_lines))
+        # save_json_file(dict(global_rl_counter), global_rl_path)
+        # save_json_file(layer_rl_dict, layer_rl_path)
+        # save_json_file(zero_ratio_dict, zero_ratio_path)
+        # with open(log_path, "w") as f:
+        #     f.write("\n".join(log_lines))
 
         print(
             f"Strategy {subdir} for {model_name} completed. Results saved to {run_dir}"
         )
+
+        del quantized_dict, global_rl_counter, layer_rl_dict, zero_ratio_dict, log_lines
+        release_memory()
 
 
 if __name__ == "__main__":
