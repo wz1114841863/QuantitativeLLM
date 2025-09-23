@@ -10,6 +10,8 @@ tmp/*
 
 # output files
 output/*
+output_diff/*
+output_weights/*
 __pycache__/*
 *.pyc
 *.pyo

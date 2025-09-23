@@ -1,7 +1,18 @@
 import os
+import gc
 import json
 import torch
 import pickle
+
+
+def release_memory():
+    """aggressive but safe for both CUDA & CPU"""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    # 如果用了 mps(Mac)
+    if hasattr(torch, "mps") and torch.mps.is_available():
+        torch.mps.empty_cache()
 
 
 def save_quantized_weigths(quantized_weights, path):

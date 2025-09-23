@@ -46,6 +46,9 @@ def analyze_model(model_name, out_dir, skip_if_exist=True):
     # model.eval()
 
     for subdir, zero_point, gs in strategies:
+        print(
+            f"Processing strategy: {subdir} | zero_point: {zero_point} | group_size: {gs}"
+        )
         run_dir = os.path.join(base_dir, subdir)
         os.makedirs(run_dir, exist_ok=True)
 
@@ -60,17 +63,18 @@ def analyze_model(model_name, out_dir, skip_if_exist=True):
             continue
 
         log_lines = [f"Model: {model_name} | Strategy: {subdir}"]
-        quantized_dict = {}
+        # quantized_dict = {}
         global_rl_counter = Counter()
         layer_rl_dict = {}
         zero_ratio_dict = {}
         for name, module in model.named_modules():
+            print(f"Processing layer: {name}")
             if isinstance(module, torch.nn.Linear):
                 weight = module.weight.data.flatten()
                 quantized = real_quantize_tensor(
                     weight, zero_point=zero_point, group_size=gs
                 )
-                quantized_dict[name] = quantized.cpu()
+                # quantized_dict[name] = quantized.cpu()
 
                 runs, len_counter = compute_run_lengths(quantized)
                 global_rl_counter.update(len_counter)
@@ -93,7 +97,10 @@ def analyze_model(model_name, out_dir, skip_if_exist=True):
                 del weight, quantized, runs, len_counter, zero_runs
                 release_memory()
 
-        # 落盘
+                print(f"Finished layer: {name}\n")
+            print(f"2 Finished module: {name}\n")
+        print(f"Finished strategy: {subdir} for model: {model_name}")
+        # 写入文件
         # save_quantized_weigths(quantized_dict, weight_path)
         # save_json_file(dict(global_rl_counter), global_rl_path)
         # save_json_file(layer_rl_dict, layer_rl_path)
@@ -105,7 +112,8 @@ def analyze_model(model_name, out_dir, skip_if_exist=True):
             f"Strategy {subdir} for {model_name} completed. Results saved to {run_dir}"
         )
 
-        del quantized_dict, global_rl_counter, layer_rl_dict, zero_ratio_dict, log_lines
+        del quantized_dict
+        del obal_rl_counter, layer_rl_dict, zero_ratio_dict, log_lines
         release_memory()
 
 
