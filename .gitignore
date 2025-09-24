@@ -12,6 +12,8 @@ tmp/*
 output/*
 output_diff/*
 output_weights/*
+output_bin/*
+
 __pycache__/*
 *.pyc
 *.pyo

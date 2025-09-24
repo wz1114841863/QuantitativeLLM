@@ -4,18 +4,27 @@ from quantizer.pre_quant import get_blocks, get_named_linears
 
 
 def real_quantize_tensor(
-    tensor, zero_point: bool = False, group_size: Optional[int] = None
+    tensor,
+    zero_point: bool = False,
+    group_size: Optional[int] = None,
+    rerurn_scale=False,
 ):
     if zero_point:
         if group_size is None:
-            return real_zero_point_quantize_to_4bit(tensor)
+            quantized, zero_point, scale = real_zero_point_quantize_to_4bit(tensor)
         else:
-            return group_zero_point_quantize_to_4bit(tensor, group_size)
+            quantized, zero_point, scale = group_zero_point_quantize_to_4bit(
+                tensor, group_size
+            )
+        return quantized if not rerurn_scale else (quantized, zero_point, scale)
+
     else:
         if group_size is None:
-            return real_symm_quantize_to_4bit(tensor)
+            quantized, scale = real_symm_quantize_to_4bit(tensor)
         else:
-            return group_symm_quantize_to_4bit(tensor, group_size)
+            quantized, scale = group_symm_quantize_to_4bit(tensor, group_size)
+
+        return quantized if not rerurn_scale else (quantized, scale)
 
 
 @torch.no_grad()
@@ -25,7 +34,7 @@ def real_symm_quantize_to_4bit(tensor):
     scale = max_abs_val / 7.0 if max_abs_val != 0 else 1.0
 
     quantized_int = torch.round(tensor / scale).clamp(-8, 7).to(torch.int8)
-    return quantized_int
+    return quantized_int, scale
 
 
 @torch.no_grad()
@@ -51,7 +60,7 @@ def group_symm_quantize_to_4bit(tensor, group_size=128):
         scales[i] = scale
 
     quantized_tensor = quantized_data.reshape(original_shape)
-    return quantized_tensor
+    return quantized_tensor, scales
 
 
 @torch.no_grad()
@@ -69,7 +78,7 @@ def real_zero_point_quantize_to_4bit(tensor):
         scale = 1.0
     zero_point = torch.round(-min_val / scale).clamp(0, 15)
     quantized = torch.round(tensor / scale + zero_point).clamp(0, 15).to(torch.uint8)
-    return quantized
+    return quantized, zero_point, scale
 
 
 @torch.no_grad()
@@ -106,7 +115,7 @@ def group_zero_point_quantize_to_4bit(tensor, group_size=128):
         scales[i] = scale
         zero_points[i] = zero_point
 
-    return quantized.reshape(original_shape)
+    return quantized.reshape(original_shape), zero_points, scales
 
 
 if __name__ == "__main__":

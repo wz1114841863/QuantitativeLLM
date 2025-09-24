@@ -25,6 +25,7 @@ def save_model_weights(model_name, out_dir):
 
 if __name__ == "__main__":
     # model_name = "facebook/opt-125m"
-    model_name = "meta-llama/Llama-2-7b-hf"
+    # model_name = "meta-llama/Llama-2-7b-hf"
+    model_name = "EleutherAI/gpt-neo-2.7B"
     out_dir = "./output_weights/"
     save_model_weights(model_name, out_dir)

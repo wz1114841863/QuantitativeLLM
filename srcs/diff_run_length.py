@@ -143,7 +143,8 @@ if __name__ == "__main__":
     # out_dir = "./output_diff/"
     # analyze_diff_model(model_name, out_dir)
 
-    layer_path = "output_weights/facebook_opt-125m_layers/"
+    # layer_path = "output_weights/facebook_opt-125m_layers/"
+    layer_path = "output_weights/EleutherAI_gpt-neo-2.7B_layers/"
     for index in range(3):
         dubug_diff_model(layer_path, index, False, use_sort=False)
         dubug_diff_model(layer_path, index, False, use_sort=True)
