@@ -14,6 +14,9 @@ output_diff/*
 output_weights/*
 output_bin/*
 
+results/*
+result/*
+
 __pycache__/*
 *.pyc
 *.pyo

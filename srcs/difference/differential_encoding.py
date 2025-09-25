@@ -8,8 +8,20 @@ def diff_encode_int4(W, tile=128):
     W_diff = torch.zeros_like(W)
     W_diff[:, 0] = W[:, 0]
     W_diff[:, 1:] = W[:, 1:] - W[:, :-1]
-    W_diff = torch.round(W_diff).clamp(-8, 7).to(torch.int8)
+    # 差分会带来更大的值域[-15, 15], 需要合理编码, clamp操作会丢信息
+    # W_diff = torch.round(W_diff).clamp(-8, 7).to(torch.int8)
     return W_diff.view(-1)
+
+
+def diff_encode_uint4(tensor_uint4, tile=128):
+    """Differential encoding for zero-point weights."""
+    tensor = tensor_uint4.float().view(-1, tile)
+    diff = torch.zeros_like(tensor)
+    diff[:, 0] = tensor[:, 0]
+    diff[:, 1:] = tensor[:, 1:] - tensor[:, :-1]
+    # 差分值域可能在 [-15, 15],需要合理编码(可 clamp 或保留原始差值)
+    # diff = torch.round(diff).clamp(0, 15).to(torch.int8)
+    return diff.view(-1)
 
 
 def diff_decode_int4(W_diff, tile=128):
@@ -23,16 +35,21 @@ def diff_decode_int4(W_diff, tile=128):
 
 
 def stat_diff(W_diff, tile=128):
+    """
+    same 高 → 零值多 → RLE / 稀疏编码受益
+    cov2 高 → 差分小幅抖动 → **变长编码(Huffman/Golomb)**受益
+    long4 高 → 长重复片段多 → 游程编码受益
+    """
     W_diff = W_diff.view(-1, tile)
     # 符号覆盖率
-    cov2 = (W_diff.abs() <= 1).float().mean().item()
-    cov3 = (W_diff.abs() <= 3).float().mean().item()
-    same = (W_diff == 0).float().mean().item()
-    # 游程统计
+    cov2 = (W_diff.abs() <= 1).float().mean().item()  # |diff| ≤ 1
+    cov3 = (W_diff.abs() <= 3).float().mean().item()  # |diff| ≤ 3
+    same = (W_diff == 0).float().mean().item()  # diff == 0
+    # 游程统计, 总"长游程 >= 3"个数 / 总元素数
     long4 = 0.0
     for row in W_diff:
         _, runlen = torch.unique_consecutive(row, return_counts=True)
-        long4 += (runlen >= 4).sum().item()
+        long4 += (runlen >= 3).sum().item()
     long4 /= W_diff.numel()
     return cov2, cov3, same, long4
 
