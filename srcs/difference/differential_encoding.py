@@ -2,25 +2,27 @@ import torch
 import numpy as np
 
 
-def diff_encode_int4(W, tile=128):
+def diff_encode_int4(W, tile=128, clamp=False):
     """Differential encoding for INT4 weights."""
     W = W.view(-1, tile)
     W_diff = torch.zeros_like(W)
     W_diff[:, 0] = W[:, 0]
     W_diff[:, 1:] = W[:, 1:] - W[:, :-1]
     # 差分会带来更大的值域[-15, 15], 需要合理编码, clamp操作会丢信息
-    # W_diff = torch.round(W_diff).clamp(-8, 7).to(torch.int8)
+    if clamp:  # 困惑度直接跑飞
+        W_diff[:, 1:] = torch.round(W_diff[:, 1:]).clamp(-8, 7)
     return W_diff.view(-1)
 
 
-def diff_encode_uint4(tensor_uint4, tile=128):
+def diff_encode_uint4(tensor_uint4, tile=128, clamp=False):
     """Differential encoding for zero-point weights."""
-    tensor = tensor_uint4.float().view(-1, tile)
+    tensor = tensor_uint4.view(-1, tile)
     diff = torch.zeros_like(tensor)
     diff[:, 0] = tensor[:, 0]
     diff[:, 1:] = tensor[:, 1:] - tensor[:, :-1]
-    # 差分值域可能在 [-15, 15],需要合理编码(可 clamp 或保留原始差值)
-    # diff = torch.round(diff).clamp(0, 15).to(torch.int8)
+    # 差分值域可能在 [-15, 15],需要合理编码
+    if clamp:  # 困惑度直接NAN, 所有的-1等全部被截断为0了
+        diff[:, 1:] = torch.round(diff[:, 1:]).clamp(0, 15)
     return diff.view(-1)
 
 
@@ -30,8 +32,18 @@ def diff_decode_int4(W_diff, tile=128):
     W = torch.zeros_like(W_diff)
     W[:, 0] = W_diff[:, 0]
     for i in range(1, W.shape[1]):
-        W[:, i] = W[:, i - 1] + W_diff[:, i].float()
+        W[:, i] = W[:, i - 1] + W_diff[:, i]
     return W.view(-1)
+
+
+def diff_decode_uint4(diff_uint4, tile=128):
+    """Decode differential encoded UINT4 weights."""
+    diff = diff_uint4.view(-1, tile)  # [n_tile, tile]
+    rec = torch.zeros_like(diff, dtype=torch.float32)
+    rec[:, 0] = diff[:, 0]
+    for i in range(1, diff.shape[1]):
+        rec[:, i] = rec[:, i - 1] + diff[:, i]
+    return rec.view(-1)
 
 
 def stat_diff(W_diff, tile=128):

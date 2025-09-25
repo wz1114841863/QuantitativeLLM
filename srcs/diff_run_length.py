@@ -21,6 +21,7 @@ from srcs.utils.utils import (
     save_log,
     save_json_file,
 )
+from srcs.utils.reorder import reorder_tile
 
 
 def analyze_diff_model(model_name, out_dir, skip_if_exist=True):
@@ -186,6 +187,23 @@ def test_different_quantizers(layer_path, index):
             f"  Cov2: {cov2:.4f} | Cov3: {cov3:.4f} | Same: {same:.4f} | Long4: {long4:.4f}"
         )
 
+        # 重排后再差分编码统计
+        w_reord, _ = reorder_tile(quantized, tile_size=128)
+        if zero_point:
+            diff_reord = diff_encode_uint4(w_reord, tile=tile)
+        else:
+            diff_reord = diff_encode_int4(w_reord, tile=tile)
+        cov2_r, cov3_r, same_r, long4_r = stat_diff(diff_reord, tile=tile)
+        runs_reord, _ = compute_run_lengths(diff_reord)
+        zero_runs_reord = [l for v, l in runs_reord if v == 0]
+        zero_ratio_reord = sum(zero_runs_reord) / weight.numel()
+
+        print("[重排后再差分编码]")
+        print(f"  Runs: {len(runs_reord):>6} | ZeroRatio: {zero_ratio_reord:.4f}")
+        print(
+            f"  Cov2: {cov2_r:.4f} | Cov3: {cov3_r:.4f} | Same: {same_r:.4f} | Long4: {long4_r:.4f}"
+        )
+
 
 if __name__ == "__main__":
     model_name = "facebook/opt-125m"
@@ -202,5 +220,5 @@ if __name__ == "__main__":
     #     dubug_diff_model(layer_path, index, True, use_sort=False)
     #     dubug_diff_model(layer_path, index, True, use_sort=True)
 
-    for index in range(3):
+    for index in range(2, 4):
         test_different_quantizers(layer_path, index)
