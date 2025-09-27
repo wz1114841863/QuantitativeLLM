@@ -208,8 +208,8 @@ def test_different_quantizers(layer_path, index):
 if __name__ == "__main__":
     model_name = "facebook/opt-125m"
 
-    # layer_path = "output_weights/facebook_opt-125m_layers/"
-    layer_path = "output_weights/EleutherAI_gpt-neo-2.7B_layers/"
+    layer_path = "output_weights/facebook_opt-125m_layers/"
+    # layer_path = "output_weights/EleutherAI_gpt-neo-2.7B_layers/"
 
     # out_dir = "./output_diff/"
     # analyze_diff_model(model_name, out_dir)
@@ -220,5 +220,5 @@ if __name__ == "__main__":
     #     dubug_diff_model(layer_path, index, True, use_sort=False)
     #     dubug_diff_model(layer_path, index, True, use_sort=True)
 
-    for index in range(2, 4):
+    for index in range(0, 1):
         test_different_quantizers(layer_path, index)

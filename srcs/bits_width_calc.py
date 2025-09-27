@@ -1,0 +1,166 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
+
+from collections import Counter
+from pathlib import Path
+from datetime import datetime
+
+from srcs.quantizer.real_quantize import *
+from srcs.quantizer.pre_quant import get_named_linears
+from srcs.save_weights.save_layer_werights import load_saved_layer
+from srcs.difference.differential_encoding import (
+    diff_encode_int4,
+    diff_encode_uint4,
+    diff_decode_int4,
+    stat_diff,
+    stat_diff_without_first,
+)
+from srcs.utils.run_lengths_calculate import compute_run_lengths
+from srcs.utils.utils import (
+    release_memory,
+    save_quantized_weigths,
+    save_log,
+    save_json_file,
+)
+from srcs.utils.reorder import reorder_tile
+
+
+"""
+文件说明:
+    计算采用不同的编码后, 权重的平均位宽
+"""
+
+
+def load_layer_diff_weights(layer_path, index):
+    """Load the weights of a specific layer from saved files."""
+    group_size = 128
+    tile = group_size
+    zero_point = True
+    strategies = [
+        ("real_symm", False, None),
+        ("real_zero_point", True, None),
+        ("group_symm", False, group_size),
+        ("group_zero_point", True, group_size),
+    ]
+
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
+    quantized = real_quantize_tensor(
+        weight, zero_point=zero_point, group_size=group_size
+    )
+
+
+def calc_layer_weights_width(layer_path, index):
+    """Load the weights of a specific layer from saved files."""
+    group_size = 128
+    tile = group_size
+    zero_point = True
+
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    orig_elem = weight.numel()
+    orig_bits = 32  # 假设原始 fp32
+    orig_bytes = orig_elem * 4  # 字节
+
+    # ---------- 量化 ----------
+    quantized = real_quantize_tensor(
+        weight, zero_point=zero_point, group_size=group_size
+    )
+    q_elem = quantized.numel()
+    q_bits = 4  # INT4
+    q_bytes_bit = q_elem * 4  # 位字节 = 元素数 * 4bit
+
+    print(f"\nLayer: {name}")
+    print("[量化前]")
+    print(
+        f"  Elements: {orig_elem:>10} | Bit-width: {orig_bits} bit | Storage: {orig_bytes:>10.2f} B"
+    )
+    print("[量化后 INT4]")
+    print(
+        f"  Elements: {q_elem:>10} | Bit-width: {q_bits} bit | Storage: {q_bytes_bit/8:>10.2f} B | Compression: {(1-q_bits/orig_bits)*100:6.2f}%"
+    )
+
+    # ---------- chunk_vlc 平均位宽 ----------
+    rle_bit_per_weight = chunk_vlc_len(quantized, tile=tile)  # 你的函数
+    rle_bytes_bit = q_elem * rle_bit_per_weight  # 总 bit
+    print(f"[chunk_vlc后]")
+    print(
+        f"  Avg bit/weight: {rle_bit_per_weight:8.3f} | Storage: {rle_bytes_bit/8:>10.2f} B | vs INT4: {(1-rle_bit_per_weight/4)*100:6.2f}% vs FP32: {(1-rle_bit_per_weight/32)*100:6.2f}%"
+    )
+
+
+def zp_rle_len(quantized, tile=128):
+    """返回 zp-anchor RLE 的平均码长 [bit/weight]"""
+    q = quantized.view(-1, tile)  # [N,128]
+    zp = q.median(dim=1, keepdim=True)[0].round().clamp(0, 15)  # [N,1]  per-group zp
+    print(f"  Zero-point (median) range: {zp.min().item()} ~ {zp.max().item()}")
+    mask = q == zp  # [N,128]  bool
+    run_len = mask.sum(dim=1)  # 每块 run 长度
+    n_zp = run_len.sum().item()  # 总 zp 样本数
+    n_other = q.numel() - n_zp  # 非 zp 样本数
+    n_run_block = (mask != 0).any(dim=1).sum().item()  # 有 run 的块数
+
+    # 码流 bit 数
+    bits_zp_run = n_run_block * 1  # 每块 1 bit run-flag
+    bits_zp_len = (run_len > 1).sum().item() * 3  # run≥2 时 3 bit len-1
+    bits_other = n_other * 5  # 非 zp: 1+4 bit
+    total_bits = bits_zp_run + bits_zp_len + bits_other
+
+    return total_bits / q.numel()  # bit / weight
+
+
+def zp_rle_len_encode_zp(quantized, tile=128):
+    """
+    编码阶段重新选 zp(中位数/mode),
+    并把 4 bit zp 值写进码流 → 返回总位宽 [bit/weight]
+    """
+    q = quantized.view(-1, tile)  # [N,128]
+    # ① 重新选 zp(中位数)
+    new_zp = q.median(dim=1, keepdim=True)[0].round().clamp(0, 15)  # [N,1]
+    mask = q == new_zp  # [N,128]  bool
+    run_len = mask.sum(dim=1)  # 每块 run 长度
+    n_zp = run_len.sum().item()  # 总 zp 样本数
+    n_other = q.numel() - n_zp  # 非 zp 样本数
+    n_run_block = (run_len > 0).sum().item()  # 有 run 的块数
+
+    # ② 编码位宽
+    bits_zp_run_flag = n_run_block * 1  # 每块 1 bit:是否有 zp-run
+    bits_zp_len = (run_len > 1).sum().item() * 3  # run≥2 时 3 bit len-1
+    bits_other = n_other * 5  # 非 zp: 1+4 bit
+    bits_zp_value = new_zp.numel() * 4  # 每块 4 bit 新 zp 值
+
+    # ③ 总位宽
+    total_bits = bits_zp_run_flag + bits_zp_len + bits_other + bits_zp_value
+    return total_bits / q.numel()  # bit / weight
+
+
+def chunk_vlc_len(quantized, tile=128):
+    """
+    Chunk-VLC: |w|≤1 → 2 bit, |w|≤3 → 3 bit, 其余 → 4 bit
+    返回平均码长 [bit/weight]
+    """
+    q = quantized.view(-1, tile)  # [N,128]
+    anchor = q.median(dim=1, keepdim=True)[0].round().clamp(0, 15)  # [N,1] 中位数锚
+    delta = q - anchor  # [-15,15] 以锚为中心
+    cov1 = (delta.abs() <= 1).float().mean().item()  # |Δ|≤1
+    cov3 = (delta.abs() <= 3).float().mean().item()  # |Δ|≤3
+
+    # 码本位宽
+    bit_1 = 2  # |w|≤1
+    bit_3 = 3  # |w|≤3
+    bit_4 = 4  # 其余
+
+    # 平均码长
+    print(f"  Cov1: {cov1:.4f} | Cov3: {cov3:.4f}")
+    avg_bit = bit_1 * cov1 + bit_3 * (cov3 - cov1) + bit_4 * (1 - cov3)
+    return avg_bit
+
+
+if __name__ == "__main__":
+    layer_path = "output_weights/facebook_opt-125m_layers/"
+    # layer_path = "output_weights/EleutherAI_gpt-neo-2.7B_layers/"
+
+    for index in range(0, 1):
+        results = calc_layer_weights_width(layer_path, index)

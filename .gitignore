@@ -16,6 +16,10 @@ output_bin/*
 
 results/*
 result/*
+diff_hist/*
+symm_hist/*
+plt_figures/*
+*.csv
 
 __pycache__/*
 *.pyc

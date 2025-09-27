@@ -11,6 +11,12 @@ from srcs.difference.differential_encoding import diff_encode_int4, diff_to_drle
 from srcs.utils.run_lengths_calculate import compute_run_lengths
 from srcs.utils.reorder import reorder_tile
 
+"""
+    文件说明:
+        生成指定层的二进制文件, 包含量化权重, 差分编码, 游程编码等
+        跟专用硬件输入绑定
+"""
+
 
 def generate_binary_file(layer_path, index, out_dir):
     """Generate a binary file for the specified layer index."""

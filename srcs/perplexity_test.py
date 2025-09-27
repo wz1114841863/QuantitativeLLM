@@ -9,6 +9,12 @@ from srcs.quantizer.pseudo_quantize import (
 )
 from utils.perplexity import calc_perplexity_wikitext
 
+"""
+    文件说明:
+        1. 测试模型的伪量化权重的困惑度
+        2. 测试模型的伪差分量化权重的困惑度
+"""
+
 
 def test_pseudo_perplexity(model_name):
     """Test the perplexity of an OPT model."""

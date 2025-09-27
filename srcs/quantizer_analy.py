@@ -19,6 +19,11 @@ from srcs.utils.utils import (
     save_json_file,
 )
 
+"""
+    文件说明:
+        对比不同的量化方法下, 差分编码前后的游程统计指标
+"""
+
 
 def analyze_layer_quant(
     layer_weight: torch.Tensor,

@@ -17,12 +17,12 @@ def diff_encode_int4(W, tile=128, clamp=False):
 def diff_encode_uint4(tensor_uint4, tile=128, clamp=False):
     """Differential encoding for zero-point weights."""
     tensor = tensor_uint4.view(-1, tile)
-    diff = torch.zeros_like(tensor)
-    diff[:, 0] = tensor[:, 0]
-    diff[:, 1:] = tensor[:, 1:] - tensor[:, :-1]
+    diff = torch.zeros_like(tensor, dtype=torch.int8)  # ← 用 int8 装结果
+    diff[:, 0] = tensor[:, 0].to(torch.int8)  # 基值
+    diff[:, 1:] = tensor[:, 1:].to(torch.int8) - tensor[:, :-1].to(torch.int8)
     # 差分值域可能在 [-15, 15],需要合理编码
-    if clamp:  # 困惑度直接NAN, 所有的-1等全部被截断为0了
-        diff[:, 1:] = torch.round(diff[:, 1:]).clamp(0, 15)
+    # if clamp:  # 困惑度直接NAN, 所有的-1等全部被截断为0了
+    #    diff[:, 1:] = torch.round(diff[:, 1:]).clamp(0, 15)
     return diff.view(-1)
 
 
@@ -63,6 +63,29 @@ def stat_diff(W_diff, tile=128):
         _, runlen = torch.unique_consecutive(row, return_counts=True)
         long4 += (runlen >= 3).sum().item()
     long4 /= W_diff.numel()
+    return cov2, cov3, same, long4
+
+
+def stat_diff_without_first(W_diff, tile=128):
+    """
+    W_diff: 已经做过 group-diff 的张量,shape 任意,会被 view(-1, tile)
+    返回:跳过每块第 0 个样本后的覆盖率
+    """
+    W_diff = W_diff.view(-1, tile)  # [N, tile]
+    # 去掉每块第 0 个元素
+    delta_only = W_diff[:, 1:].contiguous()  # [N, tile-1]
+    total = delta_only.numel()
+
+    cov2 = (delta_only.abs() <= 1).float().sum() / total
+    cov3 = (delta_only.abs() <= 3).float().sum() / total
+    same = (delta_only == 0).float().sum() / total
+
+    # 游程 ≥3 占比
+    long4 = 0.0
+    for row in delta_only:
+        _, runlen = torch.unique_consecutive(row, return_counts=True)
+        long4 += (runlen >= 3).sum().item()
+    long4 /= total
     return cov2, cov3, same, long4
 
 

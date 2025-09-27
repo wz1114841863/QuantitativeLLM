@@ -14,6 +14,12 @@ from srcs.utils.utils import (
     save_json_file,
 )
 
+"""
+    文件说明:
+        分析模型的线性层权重的量化和游程统计
+        Error: 由于WSL2的显存限制, 目前只能跑小模型
+"""
+
 
 def release_memory():
     """aggressive but safe for both CUDA & CPU"""

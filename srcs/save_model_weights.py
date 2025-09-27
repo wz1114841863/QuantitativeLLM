@@ -3,6 +3,11 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 from srcs.save_weights.save_layer_werights import save_all_linear_layers
 
+"""
+    文件说明:
+        为便于分析, 保存模型的线性层权重到指定目录
+"""
+
 
 def save_model_weights(model_name, out_dir):
     """Save all linear layer weights of a model to separate files."""
