@@ -13,6 +13,7 @@ from srcs.difference.differential_encoding import (
     diff_encode_uint4,
     diff_decode_int4,
     stat_diff,
+    stat_diff_zp_centered,
 )
 from srcs.utils.run_lengths_calculate import compute_run_lengths
 from srcs.utils.utils import (
@@ -205,8 +206,67 @@ def test_different_quantizers(layer_path, index):
         )
 
 
+def test_group_zero_point(layer_path, index):
+    """基于分组 + zero-point 的量化 + 差分编码的游程统计"""
+    group_size = 128
+    tile = group_size
+
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
+    quantized, zero_point, scale = real_quantize_tensor(
+        weight, zero_point=True, group_size=group_size, return_scale=True
+    )
+
+    # 对原始量化值分布进行统计
+    cov2, cov3, same, long4 = stat_diff_zp_centered(quantized, zp=zero_point, tile=tile)
+    runs, len_counter = compute_run_lengths(quantized)
+    zero_runs = [l for v, l in runs if v == 0]
+    zero_ratio_orig = sum(zero_runs) / weight.numel()
+    print("[原始量化值, 基于zero-point进行统计]")
+    print(f"  Runs: {len(runs):>6} | ZeroRatio: {zero_ratio_orig:.4f}")
+    print(
+        f"  Cov2: {cov2:.4f} | Cov3: {cov3:.4f} | Same: {same:.4f} | Long4: {long4:.4f}"
+    )
+
+    del cov2, cov3, same, long4
+    del runs, len_counter, zero_runs
+
+    # 差分编码后统计
+    diff_encoded = diff_encode_uint4(quantized, tile=tile)
+    cov2, cov3, same, long4 = stat_diff(diff_encoded, tile=tile)
+    runs_diff, _ = compute_run_lengths(diff_encoded)
+    zero_runs_diff = [l for v, l in runs_diff if v == 0]
+    zero_ratio_diff = sum(zero_runs_diff) / weight.numel()
+
+    print("[差分编码后]")
+    print(f"  Runs: {len(runs_diff):>6} | ZeroRatio: {zero_ratio_diff:.4f}")
+    print(
+        f"  Cov2: {cov2:.4f} | Cov3: {cov3:.4f} | Same: {same:.4f} | Long4: {long4:.4f}"
+    )
+
+
+def calate_diff_distribution(layer_path, index):
+    """计算差分值的分布"""
+    group_size = 128
+    tile = group_size
+
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
+    quantized, zero_point, scale = real_quantize_tensor(
+        weight, zero_point=True, group_size=group_size, return_scale=True
+    )
+
+    diff_encoded = diff_encode_uint4(quantized, tile=tile)
+    abs_diff = diff_encoded.abs().int()
+    pct = torch.bincount(abs_diff, minlength=16) / abs_diff.numel()
+    print("差分值分布:")
+    print(f"pct[:4]: {pct[:4]}, sum: {sum(pct[:4]).item():.4f}")  # 0,1,2,3 占比
+
+
 if __name__ == "__main__":
-    model_name = "facebook/opt-125m"
+    # model_name = "facebook/opt-125m"
 
     layer_path = "output_weights/facebook_opt-125m_layers/"
     # layer_path = "output_weights/EleutherAI_gpt-neo-2.7B_layers/"
@@ -220,5 +280,7 @@ if __name__ == "__main__":
     #     dubug_diff_model(layer_path, index, True, use_sort=False)
     #     dubug_diff_model(layer_path, index, True, use_sort=True)
 
-    for index in range(0, 1):
-        test_different_quantizers(layer_path, index)
+    for index in range(0, 5):
+        # test_different_quantizers(layer_path, index)
+        # test_group_zero_point(layer_path, index)
+        calate_diff_distribution(layer_path, index)

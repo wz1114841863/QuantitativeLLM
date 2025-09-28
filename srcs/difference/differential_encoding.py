@@ -21,8 +21,8 @@ def diff_encode_uint4(tensor_uint4, tile=128, clamp=False):
     diff[:, 0] = tensor[:, 0].to(torch.int8)  # 基值
     diff[:, 1:] = tensor[:, 1:].to(torch.int8) - tensor[:, :-1].to(torch.int8)
     # 差分值域可能在 [-15, 15],需要合理编码
-    # if clamp:  # 困惑度直接NAN, 所有的-1等全部被截断为0了
-    #    diff[:, 1:] = torch.round(diff[:, 1:]).clamp(0, 15)
+    if clamp:  # 困惑度直接NAN, 所有的-1等全部被截断为0了
+        diff[:, 1:] = torch.round(diff[:, 1:]).clamp(-15, 15)
     return diff.view(-1)
 
 
@@ -63,6 +63,33 @@ def stat_diff(W_diff, tile=128):
         _, runlen = torch.unique_consecutive(row, return_counts=True)
         long4 += (runlen >= 3).sum().item()
     long4 /= W_diff.numel()
+    return cov2, cov3, same, long4
+
+
+def stat_diff_zp_centered(W_diff, zp, tile=128):
+    """
+    W_diff : 任意形状 Tensor,量化前的权重
+    zp     : 形状 [G,1] 或能被 reshape 成 [G,1],每个元素是该 group 的唯一 zero-point
+    tile   : 128
+    return : cov2, cov3, same, long4
+             全部以"W_diff - zp"作为误差序列再统计
+    """
+    W_diff = W_diff.view(-1, tile)  # [G, 128]
+    zp = zp.view(-1, 1)  # [G, 1]  保证广播
+    centered = W_diff - zp  # [G, 128]  以 zp 为零点
+
+    # 符号覆盖率
+    cov2 = (centered.abs() <= 1).float().mean().item()
+    cov3 = (centered.abs() <= 3).float().mean().item()
+    same = (centered == 0).float().mean().item()
+
+    # 游程统计
+    long4 = 0.0
+    for row in centered:
+        _, runlen = torch.unique_consecutive(row, return_counts=True)
+        long4 += (runlen >= 3).sum().item()
+    long4 /= centered.numel()
+
     return cov2, cov3, same, long4
 
 

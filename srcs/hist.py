@@ -1,6 +1,7 @@
 import csv
 import os
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import torch
 
@@ -291,11 +292,11 @@ def layer_dist_csv(layer_path, index, tile=128, csv_file="layer_dist.csv"):
     name = info["layer_name"]
     q = real_quantize_tensor(weight, zero_point=True, group_size=tile).view(-1)  # INT4
 
-    # ① 每 bucket 占比
+    # 每 bucket 占比
     cnt = torch.bincount(q, minlength=16)  # [16]
     ratio = cnt.float() / q.numel()  # [16] 占比
 
-    # ② 指标
+    # 指标
     zp = q.view(-1, tile).min(dim=1)[0]  # 当前 zp(min)
     med = q.view(-1, tile).median(dim=1)[0]  # 中位数
     mode = q.view(-1, tile).mode(dim=1)[0]  # 众数
@@ -304,7 +305,7 @@ def layer_dist_csv(layer_path, index, tile=128, csv_file="layer_dist.csv"):
     zero = (q == 0).float().mean().item()  # zero-ratio
     long4 = stat_diff_without_first(q, tile)[3]  # Long4≥3
 
-    # ③ 写一行 csv
+    # 写csv
     row = (
         [name]
         + [f"{v:.2f}" for v in ratio.cpu().tolist()]
@@ -323,25 +324,20 @@ def layer_dist_csv(layer_path, index, tile=128, csv_file="layer_dist.csv"):
         writer.writerow(row)
 
 
-# TODO: fixed
-def plot_weights():
-    layer_path = "output_weights/facebook_opt-125m_layers/"
-    # layer_path = "output_weights/EleutherAI_gpt-neo-2.7B_layers/"
-
-    for index in range(0, 5):
+def plot_weights(layer_path=None, start_index=0, end_index=1, dir_path="plt_figures"):
+    """画出指定层的对比分布直方图"""
+    for index in range(start_index, end_index):
         results = load_layer_diff_weights(layer_path, index)
         results_symm = load_layer_symm(layer_path, index)
 
         plot_diff_histogram_split(results, bins=33, save_dir="diff_hist")
         plot_diff_histogram_split(results_symm, bins=33, save_dir="symm_hist")
 
-        plot_two_diff_histograms(results, results_symm, bins=33, save_dir="plt_figures")
+        plot_two_diff_histograms(results, results_symm, bins=33, save_dir=dir_path)
 
 
-# TODO: fixed
-def generate_layer_dist():
-    layer_path = "output_weights/facebook_opt-125m_layers/"
-    # layer_path = "output_weights/EleutherAI_gpt-neo-2.7B_layers/"
+def generate_layer_dist(layer_path=None, file_path="layer_dist.csv"):
+    """统计所有层的分布, 保存到 CSV"""
     header = (
         ["layer"]
         + [f"bucket_{i}" for i in range(16)]
@@ -355,27 +351,39 @@ def generate_layer_dist():
             "long4",
         ]
     )
-    os.remove("layer_dist.csv")
-    with open("layer_dist.csv", "w", newline="") as f:
+
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    with open(file_path, "w", newline="") as f:
         csv.writer(f).writerow(header)
 
     for index in range(0, 10):
-        # 统计分布
         layer_dist_csv(layer_path, index, tile=128, csv_file="layer_dist.csv")
 
 
-if __name__ == "__main__":
-    import pandas as pd
-
+def load_csv():
+    """加载 CSV, 筛选适合不同编码的层"""
     df = pd.read_csv("layer_dist.csv")
 
-    # 一眼看分布
     print(df[["layer", "zero_ratio", "cov2", "med_median"]].head())
 
-    # 筛选"适合 zp-RLE"的层
     good_zp = df[df["zero_ratio"] > 0.35]
     print("适合 zp-RLE 的层:", good_zp["layer"].tolist())
 
     # 筛选"适合 Chunk-VLC"的层
     good_vlc = df[df["cov2"] > 0.5]
     print("适合 Chunk-VLC 的层:", good_vlc["layer"].tolist())
+
+
+if __name__ == "__main__":
+    layer_path = "output_weights/facebook_opt-125m_layers/"
+    # layer_path = "output_weights/EleutherAI_gpt-neo-2.7B_layers/"
+
+    for index in range(1, 5):
+        results = load_layer_diff_weights(layer_path, index)
+        results_symm = load_layer_symm(layer_path, index)
+
+        plot_diff_histogram_split(results, bins=33, save_dir="diff_hist")
+        plot_diff_histogram_split(results_symm, bins=33, save_dir="symm_hist")
+
+        plot_two_diff_histograms(results, results_symm, bins=33, save_dir="plt_figures")

@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+import huffman
+
 
 from collections import Counter
 from pathlib import Path
@@ -24,7 +26,7 @@ from srcs.utils.utils import (
     save_json_file,
 )
 from srcs.utils.reorder import reorder_tile
-
+from srcs.encoder.encoder import RangeCoder4Bit
 
 """
 文件说明:
@@ -158,9 +160,156 @@ def chunk_vlc_len(quantized, tile=128):
     return avg_bit
 
 
+def quick_profit(layer_path, index):
+    group_size = 128
+    tile = 32
+    # print(f"tile: {tile}, group_size: {group_size}")
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
+    quantized, zero_point, scale = real_quantize_tensor(
+        weight, zero_point=True, group_size=group_size, return_scale=True
+    )
+
+    # diff_encoded = diff_encode_uint4(quantized, tile=tile, clamp=True)
+    # syms = diff_encoded.int().tolist()
+
+    syms = quantized.view(-1).int().tolist()
+
+    freq = Counter(syms)
+    huff_book = huffman.codebook(freq.items())
+    bpw = sum(len(huff_book[s]) * c for s, c in freq.items()) / len(syms)
+    sram_save_mb = 125e6 * (4 - bpw) / 8 / 1e6  # MB
+    print(f"码长 {bpw:.2f} b → SRAM 省 {sram_save_mb:.1f} MB")
+
+# ERROR:
+def range_encode(layer_path, index):
+    """Range 编码"""
+    group_size = 128
+    tile = 32
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
+
+    quantized, zero_point, scale = real_quantize_tensor(
+        weight, zero_point=True, group_size=group_size, return_scale=True
+    )
+
+    syms = quantized.view(-1).int().tolist()  # 4-bit 无符号 [0,15]
+    freq = Counter(syms)
+    coder = RangeCoder4Bit(freq)
+    byte_stream = coder.encode(syms)
+    bpw = len(byte_stream) * 8 / len(syms)  # 每权重要多少 bit
+
+    # ---------- 后续打印不变 ----------
+    sram_save_mb = 125e6 * (4 - bpw) / 8 / 1e6
+    print(f"码长 {bpw:.2f} b → SRAM 省 {sram_save_mb:.1f} MB")
+
+
+def rle_encode(layer_path, index):
+    """RLE 编码"""
+    group_size = 128
+    tile = 128
+    # print(f"tile: {tile}, group_size: {group_size}")
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
+    quantized, zero_point, scale = real_quantize_tensor(
+        weight, zero_point=True, group_size=group_size, return_scale=True
+    )
+
+    diff_encoded = diff_encode_uint4(quantized, tile=tile, clamp=True)
+    syms = diff_encoded.int().tolist()
+
+    # syms = quantized.view(-1).int().tolist()
+
+    out = []
+    i, n = 0, len(syms)
+    while i < n:
+        val = syms[i]
+        cnt = 1
+        while i + cnt < n and syms[i + cnt] == val and cnt < 15:  # 4-bit count
+            cnt += 1
+        out.append((val, cnt))
+        i += cnt
+    return syms, out  # list[(value, count)]
+
+
+def rle_bpw(layer_path, index):
+    syms, rle = rle_encode(layer_path, index)
+    total_bits = sum(4 + 4 for (v, c) in rle)  # 4b value + 4b count
+    print(f"RLE runs: {len(rle)}, total_bits / len(syms): {total_bits / len(syms)}")
+    # return total_bits / len(syms)
+
+
+def diff_to_drle_bits(layer_path, index):
+    """RLE 编码"""
+    group_size = 128
+    tile = 128
+    # print(f"tile: {tile}, group_size: {group_size}")
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
+    quantized, zero_point, scale = real_quantize_tensor(
+        weight, zero_point=True, group_size=group_size, return_scale=True
+    )
+
+    diff_int8 = diff_encode_uint4(quantized, tile=tile, clamp=True)
+    diff = diff_int8.flatten().numpy().astype(np.int8)
+    total_bits = 0
+
+    i, n = 0, len(diff_int8)
+    while i < n:
+        d = int(diff[i])
+        if d == 0:  # 0000 + 3b run
+            run = min(7, (diff[i : i + 7] == 0).sum())
+            total_bits += 4 + 3  # 7 b
+            i += run
+        elif d in {1, -1, 2}:  # 2 b 短码
+            total_bits += 2
+            i += 1
+        else:  # 其余值 6 b
+            total_bits += 5  # 2 b 前缀 + 4 b 值
+            i += 1
+    print(f"DRLE total_bits / len(syms): {total_bits / len(diff_int8)}")
+    return total_bits / len(diff_int8)
+
+
+# ERROR: golomb_rice_bits只适合非负整数
+def golomb_rice_bits(layer_path, index, k=2):
+    """差分 int8 → Golomb-Rice 总 bit 数"""
+    group_size = 128
+    tile = 128
+    # print(f"tile: {tile}, group_size: {group_size}")
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
+    quantized, zero_point, scale = real_quantize_tensor(
+        weight, zero_point=True, group_size=group_size, return_scale=True
+    )
+
+    diff_int8 = diff_encode_uint4(quantized, tile=tile)
+    diff = diff_int8.int().numpy().astype(np.int8)
+    total_bits = 0
+    for d in diff:
+        d = int(d)
+        if (d > 15) or (d < -16):
+            print(f"Warning: diff value {d} out of range [-16, 15], clipping.")
+        d = np.clip(d, -16, 15)
+        q = d >> k
+        r = d & ((1 << k) - 1)  # ② 商和余都来自截断后的值
+        total_bits += (q + 1) + k
+    print(f"Golomb-Rice k={k} total_bits / len(syms): {total_bits / len(diff_int8)}")
+    return total_bits, total_bits / len(diff)
+
+
 if __name__ == "__main__":
     layer_path = "output_weights/facebook_opt-125m_layers/"
     # layer_path = "output_weights/EleutherAI_gpt-neo-2.7B_layers/"
 
     for index in range(0, 1):
-        results = calc_layer_weights_width(layer_path, index)
+        # results = quick_profit(layer_path, index)
+        # results = rle_bpw(layer_path, index)
+        # results = diff_to_drle_bits(layer_path, index)
+        # results = golomb_rice_bits(layer_path, index, k=2)
+        results = range_encode(layer_path, index)

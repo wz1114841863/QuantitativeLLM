@@ -7,7 +7,7 @@ def real_quantize_tensor(
     tensor,
     zero_point: bool = False,
     group_size: Optional[int] = None,
-    rerurn_scale=False,
+    return_scale=False,
 ):
     if zero_point:
         if group_size is None:
@@ -16,7 +16,7 @@ def real_quantize_tensor(
             quantized, zero_point, scale = group_zero_point_quantize_to_4bit(
                 tensor, group_size
             )
-        return quantized if not rerurn_scale else (quantized, zero_point, scale)
+        return quantized if not return_scale else (quantized, zero_point, scale)
 
     else:
         if group_size is None:
@@ -24,7 +24,7 @@ def real_quantize_tensor(
         else:
             quantized, scale = group_symm_quantize_to_4bit(tensor, group_size)
 
-        return quantized if not rerurn_scale else (quantized, scale)
+        return quantized if not return_scale else (quantized, scale)
 
 
 @torch.no_grad()
