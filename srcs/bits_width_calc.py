@@ -26,7 +26,7 @@ from srcs.utils.utils import (
     save_json_file,
 )
 from srcs.utils.reorder import reorder_tile
-from srcs.encoder.encoder import RangeCoder4Bit
+from srcs.encoder.range_encoder import RangeCoder4Bit
 
 """
 文件说明:
