@@ -1,15 +1,12 @@
 import torch
-import transformers
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from datasets import load_dataset
+import random
 
-import random, time, argparse, os
 from tqdm import tqdm
-from typing import Optional
+from datasets import load_dataset
 
 
 def calc_perplexity_wikitext(model, tokenizer):
-    """计算模型在wikitext-2-raw-v1数据集上的困惑度(perplexity)"""
+    """计算模型在wikitext-2-raw-v1数据集上的困惑度"""
     model.seqlen = 2048
     model = model.eval()
 

@@ -33,7 +33,7 @@ def reorder_tile(w, tile_size=128):
     for i in range(num_groups):
         group = groups[i]
 
-        # 使用numpy进行高效排序(torch的argsort在某些版本有bug)
+        # 使用numpy进行高效排序
         group_np = group.numpy()
         idx = np.argsort(np.abs(group_np))  # 按绝对值排序
 

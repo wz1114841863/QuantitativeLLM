@@ -5,7 +5,7 @@ import json
 
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
 
-from srcs.save_weights.save_layer_werights import load_saved_layer
+from srcs.utils.save_layer_werights import load_saved_layer
 from srcs.quantizer.real_quantize import real_quantize_tensor
 from srcs.difference.differential_encoding import diff_encode_int4, diff_to_drle
 from srcs.utils.run_lengths_calculate import compute_run_lengths

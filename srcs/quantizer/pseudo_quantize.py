@@ -1,6 +1,6 @@
 import torch
-from tqdm import tqdm
 
+from tqdm import tqdm
 from typing import Optional
 
 from quantizer.pre_quant import get_blocks, get_named_linears

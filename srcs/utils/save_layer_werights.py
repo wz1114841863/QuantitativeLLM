@@ -163,6 +163,10 @@ def analyze_saved_layers(model_info_path):
 
 
 if __name__ == "__main__":
-    pass
-    # weight, bias, info = load_saved_layer("./saved_layers/model_name_layers", layer_index=0)
-    # weight, bias, info = load_saved_layer("./saved_layers/model_name_layers", layer_name="model.layers.0.mlp.down_proj")
+    weight, bias, info = load_saved_layer(
+        "./output_weights/facebook_opt-125m_layers", layer_index=0
+    )
+    weight, bias, info = load_saved_layer(
+        "./output_weights/facebook_opt-125m_layers",
+        layer_name="model.layers.0.mlp.down_proj",
+    )

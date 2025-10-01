@@ -11,7 +11,7 @@ from datetime import datetime
 
 from srcs.quantizer.real_quantize import *
 from srcs.quantizer.pre_quant import get_named_linears
-from srcs.save_weights.save_layer_werights import load_saved_layer
+from srcs.utils.save_layer_werights import load_saved_layer
 from srcs.difference.differential_encoding import (
     diff_encode_int4,
     diff_encode_uint4,
