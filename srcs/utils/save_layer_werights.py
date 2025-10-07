@@ -142,7 +142,7 @@ def load_saved_layer(layers_dir, layer_index=None, layer_name=None, return_tenso
 
 def analyze_saved_layers(model_info_path):
     """
-    分析保存的所有层
+    加载保存的整体的json文件, 分析保存的所有层
     """
     with open(model_info_path, "r") as f:
         model_info = json.load(f)

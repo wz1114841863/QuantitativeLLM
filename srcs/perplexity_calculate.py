@@ -61,5 +61,6 @@ def test_pseudo_diff_perplexity(model_name):
 if __name__ == "__main__":
     model_name = "facebook/opt-125m"
     out_dir = "./output/"
-    # test_pseudo_perplexity(model_name)
-    test_pseudo_diff_perplexity(model_name)
+    test_pseudo_perplexity(model_name)
+    # 差分如果clamp操作的话, 困惑度会爆炸, 不进行clamp的话对困惑度无影响
+    # test_pseudo_diff_perplexity(model_name)

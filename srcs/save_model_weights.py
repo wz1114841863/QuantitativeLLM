@@ -4,8 +4,8 @@ from srcs.utils.save_layer_werights import save_all_linear_layers, load_saved_la
 
 
 """
-    文件说明:
-        为便于分析, 保存模型的线性层权重到指定目录
+文件说明:
+    由于显存有限, 为便于分析, 保存指定模型的线性层权重到对应目录
 """
 
 
@@ -33,6 +33,7 @@ if __name__ == "__main__":
     # model_name = "EleutherAI/gpt-neo-2.7B"
     model_name = "facebook/opt-1.3b"
     out_dir = "./output_weights/"
+    # 保存模型权重
     # save_model_weights(model_name, out_dir)
 
     # 测试加载

@@ -3,6 +3,9 @@ from typing import Optional
 from quantizer.pre_quant import get_blocks, get_named_linears
 
 
+EPS = 1e-8
+
+
 def real_quantize_tensor(
     tensor,
     zero_point: bool = False,
@@ -31,7 +34,7 @@ def real_quantize_tensor(
 def real_symm_quantize_to_4bit(tensor):
     """Symmetric INT quantization to 4 bits."""
     max_abs_val = torch.max(torch.abs(tensor))
-    scale = max_abs_val / 7.0 if max_abs_val != 0 else 1.0
+    scale = max_abs_val / 7.0 if max_abs_val.item() > EPS else 1.0
 
     quantized_int = torch.round(tensor / scale).clamp(-8, 7).to(torch.int8)
     return quantized_int, scale
@@ -85,11 +88,12 @@ def real_zero_point_quantize_to_4bit(tensor):
 def group_zero_point_quantize_to_4bit(tensor, group_size=128):
     """Zero point, Group quantization to 4 bits."""
     original_shape = tensor.shape
+    device = tensor.device
     flattened = tensor.flatten()
     num_groups = (flattened.numel() + group_size - 1) // group_size
 
     quantized = torch.zeros_like(flattened, dtype=torch.uint8)
-    scales = torch.zeros(num_groups)
+    scales = torch.zeros(num_groups, device=device)
     zero_points = torch.zeros(num_groups, dtype=torch.uint8)
 
     for i in range(num_groups):

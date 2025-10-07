@@ -55,7 +55,6 @@ def load_layer_diff_weights(layer_path, index):
 
     runs, len_counter = compute_run_lengths(quantized)
     cov2, cov3, same, long4 = stat_diff(quantized, tile=tile)
-    runs_diff, _ = compute_run_lengths(quantized)
     zero_runs = [l for v, l in runs if v == 0]
     zero_ratio_orig = sum(zero_runs) / weight.numel()
     print("[原始量化值]")
