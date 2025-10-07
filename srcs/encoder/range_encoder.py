@@ -1,7 +1,9 @@
 import numpy as np
 from collections import Counter
+from typing import List, Dict, Tuple
 
-#ERROR: 解码逻辑错误
+
+# ERROR: 解码逻辑错误
 class RangeCoder4Bit:
     def __init__(self, freq):
         if isinstance(freq, Counter):
@@ -80,6 +82,71 @@ class RangeCoder4Bit:
                 self.value = (self.value << 8) | self.bits_in[self.idx + 8]
             self.idx += 8
         return s
+
+
+class RangeCoder31:
+    """31 符号 Range 编码器 / 解码器 [-16..15] → [0..31]"""
+
+    def __init__(self, freq: Dict[int, int]):
+        self.sym_cnt = np.array([freq.get(i, 1) for i in range(32)], dtype=np.int64)
+        self.total = self.sym_cnt.sum()
+        self.cum_freq = np.cumsum(np.insert(self.sym_cnt, 0, 0))  # [0, f0, f0+f1, ...]
+
+    # ---------- 编码 ----------
+    def encode(self, symbols: List[int]) -> bytes:
+        low = 0
+        range_ = 1 << 31  # 31-bit 精度
+        byte_out = bytearray()
+
+        for s in symbols:
+            sym_low = self.cum_freq[s]
+            sym_high = self.cum_freq[s + 1]
+            low += sym_low * range_ // self.total
+            range_ = sym_high * range_ // self.total - sym_low * range_ // self.total
+
+            # 字节输出(归一化)
+            while range_ <= 1 << 23:
+                byte_out.append((low >> 23) & 0xFF)
+                low = (low << 8) & ((1 << 31) - 1)
+                range_ <<= 8
+
+        # flush
+        while low != 0:
+            byte_out.append((low >> 23) & 0xFF)
+            low = (low << 8) & ((1 << 31) - 1)
+        return bytes(byte_out)
+
+    # ---------- 解码 ----------
+    def decode(self, byte_stream: bytes, length: int) -> List[int]:
+        low = 0
+        range_ = 1 << 31
+        code = 0
+        for b in byte_stream[:4]:  # 先填 4 B
+            code = (code << 8) | b
+        idx = 0
+        out = []
+        for _ in range(length):
+            # 找到当前码所在符号
+            cum = ((code - low) * self.total + range_ - 1) // range_
+            s = np.searchsorted(self.cum_freq, cum, side="right") - 1
+            out.append(s)
+
+            # 更新区间
+            sym_low = self.cum_freq[s]
+            sym_high = self.cum_freq[s + 1]
+            low += sym_low * range_ // self.total
+            range_ = sym_high * range_ // self.total - sym_low * range_ // self.total
+
+            # 字节输入归一化
+            while range_ <= 1 << 23:
+                if idx < len(byte_stream):
+                    code = ((code << 8) | byte_stream[idx]) & ((1 << 31) - 1)
+                    idx += 1
+                else:
+                    code = (code << 8) & ((1 << 31) - 1)
+                low = (low << 8) & ((1 << 31) - 1)
+                range_ <<= 8
+        return out
 
 
 if __name__ == "__main__":

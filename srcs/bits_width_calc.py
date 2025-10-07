@@ -26,7 +26,7 @@ from srcs.utils.utils import (
     save_json_file,
 )
 from srcs.utils.reorder import reorder_tile
-from srcs.encoder.range_encoder import RangeCoder4Bit
+from srcs.encoder.range_encoder import RangeCoder4Bit, RangeCoder31
 
 """
 文件说明:
@@ -171,10 +171,10 @@ def quick_profit(layer_path, index):
         weight, zero_point=True, group_size=group_size, return_scale=True
     )
 
-    # diff_encoded = diff_encode_uint4(quantized, tile=tile, clamp=True)
-    # syms = diff_encoded.int().tolist()
+    diff_encoded = diff_encode_uint4(quantized, tile=tile)
+    syms = diff_encoded.int().tolist()
 
-    syms = quantized.view(-1).int().tolist()
+    # syms = quantized.view(-1).int().tolist()
 
     freq = Counter(syms)
     huff_book = huffman.codebook(freq.items())
@@ -182,11 +182,12 @@ def quick_profit(layer_path, index):
     sram_save_mb = 125e6 * (4 - bpw) / 8 / 1e6  # MB
     print(f"码长 {bpw:.2f} b → SRAM 省 {sram_save_mb:.1f} MB")
 
+
 # ERROR:
 def range_encode(layer_path, index):
     """Range 编码"""
     group_size = 128
-    tile = 32
+    tile = 128
     weight, bias, info = load_saved_layer(layer_path, index)
     name = info["layer_name"]
     print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
@@ -194,14 +195,15 @@ def range_encode(layer_path, index):
     quantized, zero_point, scale = real_quantize_tensor(
         weight, zero_point=True, group_size=group_size, return_scale=True
     )
+    delta = diff_encode_uint4(quantized, tile=tile)
+    sym = delta + 16
+    syms = sym.int().tolist()
 
-    syms = quantized.view(-1).int().tolist()  # 4-bit 无符号 [0,15]
     freq = Counter(syms)
-    coder = RangeCoder4Bit(freq)
+    coder = RangeCoder31(freq)
     byte_stream = coder.encode(syms)
     bpw = len(byte_stream) * 8 / len(syms)  # 每权重要多少 bit
 
-    # ---------- 后续打印不变 ----------
     sram_save_mb = 125e6 * (4 - bpw) / 8 / 1e6
     print(f"码长 {bpw:.2f} b → SRAM 省 {sram_save_mb:.1f} MB")
 
@@ -303,13 +305,105 @@ def golomb_rice_bits(layer_path, index, k=2):
     return total_bits, total_bits / len(diff)
 
 
+def fixed_width(layer_path, index):
+    group_size = 128
+    tile = 128
+    # print(f"tile: {tile}, group_size: {group_size}")
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
+    quantized, zero_point, scale = real_quantize_tensor(
+        weight, zero_point=True, group_size=group_size, return_scale=True
+    )
+
+    diff_encoded = diff_encode_uint4(quantized, tile=tile)
+    syms = diff_encoded.int()
+
+    total = syms.numel()
+    le1 = (syms.abs() <= 1).sum().item()  # |Δw|≤1
+    le3 = (syms.abs() <= 3).sum().item()  # |Δw|≤3
+    ratio_le1 = le1 / total
+    ratio_le3 = le3 / total
+
+    header_bpw = 2 / 128  # 每 128 权重 2 bit 头
+    exp_bpw = header_bpw + (ratio_le3 * 3 + (1 - ratio_le3) * 5)  # 3 or 5 bit
+
+    print(f"Δw |≤1 占比 : {ratio_le1:5.1%} |≤3 占比 : {ratio_le3:5.1%}")
+    print(f"定长3/5+flag 期望码长 : {exp_bpw:.2f} bit")
+
+
+def fixed_width_group(layer_path, index):
+    group_size = 128
+    tile = 128
+    # print(f"tile: {tile}, group_size: {group_size}")
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
+    quantized, zero_point, scale = real_quantize_tensor(
+        weight, zero_point=True, group_size=group_size, return_scale=True
+    )
+
+    diff_encoded = diff_encode_uint4(quantized, tile=tile)
+    delta = diff_encoded.int()
+
+    n_tot = delta.numel()
+    n_blk = n_tot // group_size
+    delta = delta[: n_blk * group_size]  # 扔掉尾部不足
+    blocks = delta.view(n_blk, group_size)  # [n_blk, 128]
+
+    # 4. 组级窄/快判定
+    narrow_mask = (blocks.abs() <= 3).all(dim=1)  # 能否 3-bit
+    fast_mask = (blocks.abs() <= 1).all(dim=1)  # 能否 fast-path
+
+    ratio_narrow = narrow_mask.float().mean().item()
+    ratio_fast = fast_mask.float().mean().item()
+
+    # 5. 真实期望码长(定长 3/5 + 2 bit header /128)
+    header_bpw = 2 / group_size
+    exp_bpw = header_bpw + ratio_narrow * 3 + (1 - ratio_narrow) * 5
+
+    # 6. 输出
+    print(f"Δw |≤1 整组占比 : {ratio_fast:5.1%}  |≤3 整组占比 : {ratio_narrow:5.1%}")
+    print(f"真实定长3/5+flag 期望码长 : {exp_bpw:.3f} bit")
+
+
+def fixed_width_S1_3(layer_path, index):
+    group_size = 128
+    tile = 128
+    # print(f"tile: {tile}, group_size: {group_size}")
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
+    quantized, zero_point, scale = real_quantize_tensor(
+        weight, zero_point=True, group_size=group_size, return_scale=True
+    )
+
+    diff_encoded = diff_encode_uint4(quantized, tile=tile)
+    delta = diff_encoded.int().view(-1, tile)
+
+    n_tile = delta.shape[0]  # 多少 tile 行
+    delta = delta[:n_tile]  # 保持 [n_tile, 128]
+    exc_per_tile = (delta.abs() > 3).sum(dim=1)  # 按 tile 行统计
+    max_exc = exc_per_tile.max().item()
+    avg_exc = exc_per_tile.float().mean().item()
+    pct_over8 = (exc_per_tile > 8).float().mean().item()
+
+    print(f"tile行 全局≤3 : {(delta.abs() <= 3).sum().item() / delta.numel():5.1%}")
+    print(
+        f"tile行 逐块异常 | max={max_exc:2d}  avg={avg_exc:4.2f}  over-8={pct_over8:5.1%}"
+    )
+
+
 if __name__ == "__main__":
     layer_path = "output_weights/facebook_opt-125m_layers/"
     # layer_path = "output_weights/EleutherAI_gpt-neo-2.7B_layers/"
 
-    for index in range(0, 1):
+    for index in range(10, 20):
         # results = quick_profit(layer_path, index)
         # results = rle_bpw(layer_path, index)
         # results = diff_to_drle_bits(layer_path, index)
         # results = golomb_rice_bits(layer_path, index, k=2)
         results = range_encode(layer_path, index)
+        # results = fixed_width(layer_path, index)
+        # results = fixed_width_group(layer_path, index)
+        # results = fixed_width_S1_3(layer_path, index)
