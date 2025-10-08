@@ -1,9 +1,7 @@
 import torch
-import os
-import gc
 
 from collections import Counter
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
+from transformers import AutoModelForCausalLM, AutoConfig
 
 from srcs.quantizer.real_quantize import *
 from srcs.quantizer.pre_quant import get_named_linears

@@ -19,10 +19,9 @@ def select_min_dtype(indices):
 
 
 def reorder_tile(w, tile_size=128):
-    """Reorder the tensor in tiles of specified size."""
     assert w.numel() % tile_size == 0, "Weight size must be divisible by tile size."
+    assert tile_size <= 256, "tile_size > 256 needs wider index type"
     original_shape = w.shape
-    original_type = w.dtype
     flat = w.flatten()
     num_groups = flat.numel() // tile_size
     groups = flat.reshape(num_groups, tile_size)
@@ -30,23 +29,36 @@ def reorder_tile(w, tile_size=128):
     reordered_groups = []
     reverse_indices = []
 
-    for i in range(num_groups):
-        group = groups[i]
+    for group in groups:
+        group_cpu = group.cpu().numpy()
+        order = np.argsort(np.abs(group_cpu), kind="stable")
+        reord = group_cpu[order]
+        reordered_groups.append(reord.astype(group_cpu.dtype))  # 保持宽度
 
-        # 使用numpy进行高效排序
-        group_np = group.numpy()
-        idx = np.argsort(np.abs(group_np))  # 按绝对值排序
+        rev = np.argsort(order, kind="stable")
+        reverse_indices.append(select_min_dtype(rev))
 
-        # 重排权重
-        w_reord = group_np[idx]
-        reordered_groups.append(w_reord)
+    concat = np.concatenate(reordered_groups)
+    # 零拷贝回到原设备
+    w_reordered = torch.from_numpy(concat).to(device=w.device, dtype=w.dtype)
+    return w_reordered.view(original_shape), reverse_indices
 
-        # 生成反向索引并选择最小数据类型
-        rev_idx = np.argsort(idx)
-        reverse_indices.append(select_min_dtype(rev_idx))
 
-    # 合并结果
-    w_reordered = torch.tensor(np.concatenate(reordered_groups), dtype=original_type)
-    w_reordered = w_reordered.reshape(original_shape)
-
-    return w_reordered, reverse_indices
+def reorder_tile_v2(w, tile_size=128):
+    original_shape = w.shape
+    flat = w.flatten()
+    n = flat.numel()
+    groups = flat.reshape(-1, tile_size)
+    perm_list, reord_list = [], []
+    for g in groups:
+        tile_np = g.cpu().numpy()
+        perm = np.argsort(np.abs(tile_np))  # 这才是"真"排序索引
+        reord = tile_np[perm]
+        perm_list.append(perm.astype(np.uint8))  # tile_size<=256
+        reord_list.append(reord)
+    # 拼回
+    reord_all = torch.from_numpy(np.concatenate(reord_list)).to(w.device, w.dtype)
+    perm_all = np.concatenate(perm_list)  # 1-D
+    return reord_all.view(original_shape), np.split(
+        perm_all, len(perm_all) // tile_size
+    )

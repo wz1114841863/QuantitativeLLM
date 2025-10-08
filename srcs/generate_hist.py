@@ -17,7 +17,7 @@ from srcs.difference.differential_encoding import (
     diff_encode_uint4,
     diff_decode_int4,
     stat_diff,
-    stat_diff_without_first,
+    stat_diff_zp_centered,
 )
 from srcs.utils.run_lengths_calculate import compute_run_lengths
 from srcs.utils.utils import (
@@ -49,12 +49,12 @@ def load_layer_diff_weights(layer_path, index):
     weight, bias, info = load_saved_layer(layer_path, index)
     name = info["layer_name"]
     print(f"\nLayer: {name} | Original elems: {weight.numel():>8}")
-    quantized = real_quantize_tensor(
-        weight, zero_point=zero_point, group_size=group_size
+    quantized, zp, scale = real_quantize_tensor(
+        weight, zero_point=zero_point, group_size=group_size, return_scale=True
     )
 
     runs, len_counter = compute_run_lengths(quantized)
-    cov2, cov3, same, long4 = stat_diff(quantized, tile=tile)
+    cov2, cov3, same, long4 = stat_diff_zp_centered(quantized, zp=zp, tile=tile)
     zero_runs = [l for v, l in runs if v == 0]
     zero_ratio_orig = sum(zero_runs) / weight.numel()
     print("[原始量化值]")
@@ -68,13 +68,15 @@ def load_layer_diff_weights(layer_path, index):
     runs_diff, _ = compute_run_lengths(diff_encoded)
     zero_runs_diff = [l for v, l in runs_diff if v == 0]
     zero_ratio_diff = sum(zero_runs_diff) / weight.numel()
-    quant_flat = quantized.flatten().cpu().numpy()
-    diff_flat = diff_encoded.flatten().cpu().int()
+
     print("[差分编码后]")
     print(f"  Runs: {len(runs_diff):>6} | ZeroRatio: {zero_ratio_diff:.4f}")
     print(
         f"  Cov2: {cov2:.4f} | Cov3: {cov3:.4f} | Same: {same:.4f} | Long4: {long4:.4f}"
     )
+
+    quant_flat = quantized.flatten().cpu().numpy()
+    diff_flat = diff_encoded.flatten().cpu().int()
 
     return {
         "name": name,
@@ -123,13 +125,15 @@ def load_layer_symm(layer_path, index):
     runs_diff, _ = compute_run_lengths(diff_encoded)
     zero_runs_diff = [l for v, l in runs_diff if v == 0]
     zero_ratio_diff = sum(zero_runs_diff) / weight.numel()
-    quant_flat = quantized.flatten().cpu().numpy()
-    diff_flat = diff_encoded.flatten().cpu().int()
+
     print("[差分编码后]")
     print(f"  Runs: {len(runs_diff):>6} | ZeroRatio: {zero_ratio_diff:.4f}")
     print(
         f"  Cov2: {cov2:.4f} | Cov3: {cov3:.4f} | Same: {same:.4f} | Long4: {long4:.4f}"
     )
+
+    quant_flat = quantized.flatten().cpu().numpy()
+    diff_flat = diff_encoded.flatten().cpu().int()
 
     return {
         "name": name,
@@ -191,6 +195,51 @@ def plot_diff_histogram_split(stat_dict, bins=33, save_dir="plt_figures"):
     plt.savefig(save_path, dpi=300)
     plt.close()
     print(f"[INFO] Split histogram saved → {save_path}")
+
+
+def plot_hist(stat_dict, bins=33, save_dir="plt_figures"):
+    save_dir = Path(save_dir)
+    save_dir.mkdir(exist_ok=True)
+
+    name = stat_dict["name"]
+    quantized = stat_dict["quant"]  # 原始 INT4
+    diff_encoded = stat_dict["delta"]  # 差分后
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+
+    # 左图:原始量化值(uint4 → 0~15)
+    ax1.hist(
+        quantized.flatten(),
+        bins=16,
+        range=(-0.5, 15.5),
+        color="steelblue",
+        edgecolor="black",
+    )
+    ax1.set_title(f"Original INT4 - {name}")
+    ax1.set_xlabel("Quantized Value")
+    ax1.set_ylabel("Count")
+    ax1.set_xticks(range(0, 16))
+    ax1.grid(axis="y", linestyle="--", alpha=0.5)
+
+    # 右图:差分编码值(int4 → -15~15)
+    ax2.hist(
+        diff_encoded.flatten(),
+        bins=31,
+        range=(-15.5, 15.5),
+        color="orangered",
+        edgecolor="black",
+    )
+    ax2.set_title(f"After Diff - {name}")
+    ax2.set_xlabel("Delta Value")
+    ax2.grid(axis="y", linestyle="--", alpha=0.5)
+
+    plt.tight_layout()
+    time_stamp = datetime.now().strftime("%m%d_%H%M%S")
+    file_name = f"{time_stamp}_{name.replace('/', '_')}_hist.png"
+    save_path = save_dir / file_name
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+    print(f"[INFO] Histogram saved → {save_path}")
 
 
 def plot_two_diff_histograms(stat_dict_A, stat_dict_B, bins=33, save_dir="plt_figures"):
@@ -377,12 +426,14 @@ def load_csv():
 if __name__ == "__main__":
     layer_path = "output_weights/facebook_opt-125m_layers/"
     # layer_path = "output_weights/EleutherAI_gpt-neo-2.7B_layers/"
+    # layer_path = "output_weights/facebook_opt-1.3b_layers/"
 
-    for index in range(1, 5):
+    for index in range(0, 5):
         results = load_layer_diff_weights(layer_path, index)
-        results_symm = load_layer_symm(layer_path, index)
+        # results_symm = load_layer_symm(layer_path, index)
 
-        plot_diff_histogram_split(results, bins=33, save_dir="diff_hist")
-        plot_diff_histogram_split(results_symm, bins=33, save_dir="symm_hist")
+        # plot_diff_histogram_split(results, bins=33, save_dir="diff_hist")
+        plot_hist(results, bins=33, save_dir="diff_hist")
+        # plot_diff_histogram_split(results_symm, bins=33, save_dir="symm_hist")
 
-        plot_two_diff_histograms(results, results_symm, bins=33, save_dir="plt_figures")
+        # plot_two_diff_histograms(results, results_symm, bins=33, save_dir="plt_figures")

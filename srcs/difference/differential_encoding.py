@@ -114,6 +114,3 @@ def stat_diff_without_first(W_diff, tile=128):
         long4 += (runlen >= 3).sum().item()
     long4 /= total
     return cov2, cov3, same, long4
-
-
-

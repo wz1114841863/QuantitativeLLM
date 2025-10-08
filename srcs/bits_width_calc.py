@@ -3,35 +3,68 @@ import matplotlib.pyplot as plt
 import torch
 import huffman
 
-
 from collections import Counter
-from pathlib import Path
-from datetime import datetime
-
 from srcs.quantizer.real_quantize import *
-from srcs.quantizer.pre_quant import get_named_linears
 from srcs.utils.save_layer_werights import load_saved_layer
 from srcs.difference.differential_encoding import (
-    diff_encode_int4,
     diff_encode_uint4,
-    diff_decode_int4,
     stat_diff,
-    stat_diff_without_first,
 )
 from srcs.utils.run_lengths_calculate import compute_run_lengths
-from srcs.utils.utils import (
-    release_memory,
-    save_quantized_weigths,
-    save_log,
-    save_json_file,
-)
-from srcs.utils.reorder import reorder_tile
 from srcs.encoder.range_encoder import RangeCoder4Bit, RangeCoder31
+from srcs.encoder.base_encoder import *
 
 """
 文件说明:
     计算采用不同的编码后, 权重的平均位宽
 """
+
+ENCODER_REGISTRY: Dict[str, Type[BaseEncoder]] = {
+    "int4": Int4Encoder,
+    "chunk_vlc": ChunkVlcEncoder,
+}
+
+
+def encoder_analyse(layer_path: str, index: int, encoders: list[str] | None = None):
+    """
+    统一的入口函数
+    :param layer_path:  层保存路径
+    :param index:       层编号
+    :param encoders:    要对比的编码器名字列表,None 表示全部
+    """
+    if encoders is None:
+        encoders = list(ENCODER_REGISTRY.keys())
+
+    # 加载原始权重
+    weight, bias, info = load_saved_layer(layer_path, index)
+    name = info["layer_name"]
+    orig_elem = weight.numel()
+    orig_bits = 16
+    orig_bytes = orig_elem * 4
+
+    print(f"\nLayer: {name}")
+    print("[量化前]")
+    print(
+        f"  Elements: {orig_elem:>10} | Bit-width: {orig_bits} bit | "
+        f"Storage: {orig_bytes:>10.2f} B"
+    )
+
+    # 依次测试每种编码器
+    for enc_name in encoders:
+        cls = ENCODER_REGISTRY.get(enc_name)
+        if cls is None:
+            print(f"[!] Unknown encoder: {enc_name}")
+            continue
+        encoder = cls()
+        encoded = encoder.encode(weight, group_size=128, zero_point=True)
+        comp_vs_fp32 = (1 - encoded.num_bits() / (orig_elem * 32)) * 100
+        comp_vs_int4 = (1 - encoded.num_bits() / (orig_elem * 4)) * 100
+        print(f"[{enc_name}]")
+        print(
+            f"  Avg bit/weight: {encoded.num_bits()/orig_elem:8.3f} | "
+            f"Storage: {encoded.num_bytes():>10.2f} B | "
+            f"vs INT4: {comp_vs_int4:6.2f}% | vs FP32: {comp_vs_fp32:6.2f}%"
+        )
 
 
 def load_layer_diff_weights(layer_path, index):
@@ -136,28 +169,6 @@ def zp_rle_len_encode_zp(quantized, tile=128):
     # ③ 总位宽
     total_bits = bits_zp_run_flag + bits_zp_len + bits_other + bits_zp_value
     return total_bits / q.numel()  # bit / weight
-
-
-def chunk_vlc_len(quantized, tile=128):
-    """
-    Chunk-VLC: |w|≤1 → 2 bit, |w|≤3 → 3 bit, 其余 → 4 bit
-    返回平均码长 [bit/weight]
-    """
-    q = quantized.view(-1, tile)  # [N,128]
-    anchor = q.median(dim=1, keepdim=True)[0].round().clamp(0, 15)  # [N,1] 中位数锚
-    delta = q - anchor  # [-15,15] 以锚为中心
-    cov1 = (delta.abs() <= 1).float().mean().item()  # |Δ|≤1
-    cov3 = (delta.abs() <= 3).float().mean().item()  # |Δ|≤3
-
-    # 码本位宽
-    bit_1 = 2  # |w|≤1
-    bit_3 = 3  # |w|≤3
-    bit_4 = 4  # 其余
-
-    # 平均码长
-    print(f"  Cov1: {cov1:.4f} | Cov3: {cov3:.4f}")
-    avg_bit = bit_1 * cov1 + bit_3 * (cov3 - cov1) + bit_4 * (1 - cov3)
-    return avg_bit
 
 
 def quick_profit(layer_path, index):
