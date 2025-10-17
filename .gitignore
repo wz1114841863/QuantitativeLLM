@@ -21,6 +21,8 @@ diff_hist/*
 symm_hist/*
 plt_figures/*
 *.csv
+*.png
+*.jpg
 
 __pycache__/*
 *.pyc
