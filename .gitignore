@@ -14,6 +14,8 @@ output/*
 output_diff/*
 output_weights/*
 output_bin/*
+compressed_opt-125m/*
+compressed_opt-125m_gs512/*
 
 results/*
 result/*
@@ -23,6 +25,7 @@ plt_figures/*
 *.csv
 *.png
 *.jpg
+*.npz
 
 __pycache__/*
 *.pyc

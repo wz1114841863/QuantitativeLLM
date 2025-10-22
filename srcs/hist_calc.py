@@ -521,7 +521,7 @@ def simulate_golomb_rice_encoding(layer_path, index):
         compressed_payload_bits, best_k = find_optimal_k_and_encode(
             mapped_deltas, K_OPTIONS
         )
-        size_with_overhead = compressed_payload_bits + FLAG_BITS
+        size_with_overhead = len(compressed_payload_bits) + FLAG_BITS
 
         final_group_bits = min(size_with_overhead, original_group_size_bits)
         if final_group_bits == original_group_size_bits:
@@ -657,10 +657,10 @@ if __name__ == "__main__":
     # layer_path = "output_weights/EleutherAI_gpt-neo-2.7B_layers/"
     # layer_path = "output_weights/facebook_opt-1.3b_layers/"
 
-    for index in range(0, 3):
+    for index in range(0, 10):
         # results = get_hist_per_layer(layer_path, index)
         # results = analyze_compression_potential(layer_path, index)
         # simulate_delta_encoding(layer_path, index)
         # analyze_delta_distribution(layer_path, index)
-        # simulate_golomb_rice_encoding(layer_path, index)
-        verify_lossless_compression(layer_path, index)
+        simulate_golomb_rice_encoding(layer_path, index)
+        # verify_lossless_compression(layer_path, index)
