@@ -2,8 +2,10 @@ import os
 import json
 import numpy as np
 import torch
-from collections import Counter
+import re
 
+import glob
+from collections import Counter, OrderedDict
 from quantizer.pre_quant import get_named_linears
 
 
@@ -122,6 +124,7 @@ def load_saved_layer(layers_dir, layer_index=None, layer_name=None, return_tenso
         layer_info = json.load(f)
 
     # 加载权重
+    print(f"加载层 {layer_info['layer_index']}: {layer_info['layer_name']}")
     weight = np.load(layer_info["weight_path"])
     if return_tensor:
         weight = torch.from_numpy(weight)
@@ -162,11 +165,196 @@ def analyze_saved_layers(model_info_path):
         print()
 
 
+def parse_block_id(name: str) -> int:
+    """
+    从层名里提取 block 序号.
+    支持 'model.layers.12.' / 'transformer.h.12.' / '...block_12...' 等常见写法
+    返回 -1 表示未命中任何规则(这类层会被丢弃)
+    """
+    # huggingface系列: model.layers.12.
+    m = re.search(r"\.layers\.(\d+)\.", name)
+    if m:
+        return int(m.group(1))
+    # OPT/GPT-NeoX: transformer.h.12.
+    m = re.search(r"\.h\.(\d+)\.", name)
+    if m:
+        return int(m.group(1))
+    # 其他带 block_数字 的写法
+    m = re.search(r"block_?(\d+)", name)
+    if m:
+        return int(m.group(1))
+    return -1
+
+
+def save_selected_linears(
+    model,
+    model_name,
+    save_dir,
+    block_filter=None,
+    layer_filter=None,
+    return_info=True,
+):
+    """
+    只保存指定 Block 内(或名字含指定字符串)的线性层
+    block_filter : 如 [0,5,10]
+    layer_filter : 如 [".layer", ".fc"]
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    modules = get_named_linears(model)
+
+    if block_filter is not None:
+        block_filter = set(block_filter)
+        modules = {
+            n: m for n, m in modules.items() if parse_block_id(n) in block_filter
+        }
+    elif layer_filter is not None:
+        modules = {
+            n: m for n, m in modules.items() if any(k in n for k in layer_filter)
+        }
+    if not modules:
+        print("没有层满足过滤条件,退出.")
+        return None, None
+
+    layers_dir = os.path.join(save_dir, f"{model_name.replace('/', '_')}_layers")
+    os.makedirs(layers_dir, exist_ok=True)
+
+    layers_info = {}
+    for idx, (name, module) in enumerate(modules.items()):
+        safe_name = name.replace(".", "_").replace("/", "_")
+        weight_path = os.path.join(layers_dir, f"{safe_name}_weight.npy")
+        np.save(weight_path, module.weight.data.cpu().numpy())
+
+        info = {
+            "layer_name": name,
+            "weight_shape": list(module.weight.shape),
+            "weight_path": weight_path,
+        }
+
+        if module.bias is not None:
+            bias_path = weight_path.replace("_weight.npy", "_bias.npy")
+            np.save(bias_path, module.bias.data.cpu().numpy())
+            info["bias_path"] = bias_path
+            info["has_bias"] = True
+        else:
+            info["has_bias"] = False
+
+        layers_info[name] = info
+
+    index_file = os.path.join(layers_dir, "selected_layers.json")
+    with open(index_file, "w") as f:
+        json.dump(layers_info, f, indent=2)
+
+    print(f"已保存 {len(modules)} 个线性层至 {layers_dir}")
+    return layers_dir, layers_info
+
+
+def load_selected_layer(layers_dir, layer_name=None, return_tensor=True):
+    # 1. 优先用新索引
+    index_file = os.path.join(layers_dir, "selected_layers.json")
+    if os.path.exists(index_file):
+        with open(index_file) as f:
+            table = json.load(f)
+        if layer_name not in table:
+            raise KeyError(f"层 {layer_name} 不在已保存列表中")
+        info = table[layer_name]
+    else:
+        # 2. 老格式:通过层名反查 info 文件
+        #    直接用 layers_info 总表,而不用 glob
+        model_info_path = os.path.join(
+            layers_dir,
+            "..",
+            f"{os.path.basename(layers_dir).replace('_layers', '')}_model_info.json",
+        )
+        if not os.path.exists(model_info_path):
+            raise FileNotFoundError("找不到模型总 info 文件")
+        with open(model_info_path) as f:
+            model_info = json.load(f)
+        layers_info = model_info["layers_info"]
+        if layer_name not in layers_info:
+            raise KeyError(f"层 {layer_name} 不在保存列表中")
+        info = layers_info[layer_name]
+
+    w = np.load(info["weight_path"])
+    b = None
+    if info.get("has_bias", False):
+        b = np.load(info["bias_path"])
+    if return_tensor:
+        w = torch.from_numpy(w)
+        if b is not None:
+            b = torch.from_numpy(b)
+    return w, b, info
+
+
+def load_all_saved_linears(layers_dir, return_tensor=True):
+    """
+    把 layers_dir 里所有出现过的线性层全部读出来,返回:
+    {
+      layer_name_0: (weight, bias, info),
+      layer_name_1: (weight, bias, info),
+      ...
+    }
+    """
+    index_file = os.path.join(layers_dir, "selected_layers.json")
+    if os.path.exists(index_file):
+        with open(index_file) as f:
+            table = json.load(f)
+    else:
+        info_files = glob.glob(os.path.join(layers_dir, "*_info.json"))
+        table = {}
+        for path in info_files:
+            with open(path) as f:
+                one = json.load(f)
+                table[one["layer_name"]] = one
+
+    result = OrderedDict()
+    for name, info in table.items():
+        w = np.load(info["weight_path"])
+        b = None
+        if info.get("has_bias", False):
+            b = np.load(info["bias_path"])
+        if return_tensor:
+            w = torch.from_numpy(w)
+            if b is not None:
+                b = torch.from_numpy(b)
+        result[name] = (w, b, info)
+    return result
+
+
+def build_index_map(layers_dir):
+    new_index = os.path.join(layers_dir, "selected_layers.json")
+    if os.path.isfile(new_index):
+        table = json.load(open(new_index))
+        # 按保存顺序(字典序)返回层名列表
+        return list(table.keys())
+
+    # 老格式:遍历 layer_000_xxx_info.json
+    info_files = sorted(glob.glob(os.path.join(layers_dir, "*_info.json")))
+    if not info_files:
+        raise FileNotFoundError(
+            "目录下找不到 selected_layers.json 也找不到 *_info.json,无法建立索引"
+        )
+    info_files = sorted(
+        info_files, key=lambda x: int(os.path.basename(x).split("_")[1])
+    )
+    return [json.load(open(f))["layer_name"] for f in info_files]
+
+
+def load_layer_by_index(layers_dir, idx, return_tensor=True):
+    """
+    用于加载使用 save_all_linear_layers 保存的层
+    用整数索引加载权重,和原始 load_saved_layer 的 layer_index 同理
+    """
+    idx2name = build_index_map(layers_dir)
+    if idx >= len(idx2name) or idx < 0:
+        raise IndexError(f"idx {idx} 超出范围,当前共 {len(idx2name)} 层")
+    layer_name = idx2name[idx]
+
+    return load_selected_layer(
+        layers_dir, layer_name=layer_name, return_tensor=return_tensor
+    )
+
+
 if __name__ == "__main__":
     weight, bias, info = load_saved_layer(
-        "./output_weights/facebook_opt-125m_layers", layer_index=0
-    )
-    weight, bias, info = load_saved_layer(
-        "./output_weights/facebook_opt-125m_layers",
-        layer_name="model.layers.0.mlp.down_proj",
+        "./extract_weights/facebook_opt-125m_layers", layer_index=0
     )

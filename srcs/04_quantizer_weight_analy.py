@@ -26,7 +26,6 @@ from srcs.analysis.real_quantize_analy import (
 """
 文件说明:
     对量化后的模型权重进行分析, 同时验证量化的正确性
-    对量化+差分的模型权重进行分析, 对比差分带来的分布变化
 """
 
 

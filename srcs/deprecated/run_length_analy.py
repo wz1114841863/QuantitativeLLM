@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 from srcs.utils.save_layer_werights import load_saved_layer
-from srcs.utils.run_lengths_calculate import run_length_analyze
+from srcs.encoder.run_lengths_calculate import run_length_analyze
 
 """
     文件说明:

@@ -6,9 +6,15 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM
 from srcs.quantizer.real_quantize import real_quantize_tensor
 
+"""
+文件说明:
+    完整的模型压缩流程实现, 包括量化和Golomb-Rice编码
+"""
+
 # MODEL_ID = "facebook/opt-125m"
-MODEL_ID = "facebook/opt-350m"
-GROUP_SIZE = 1024
+# MODEL_ID = "facebook/opt-350m"
+MODEL_ID = "facebook/opt-1.3b"
+GROUP_SIZE = 512
 N_BITS = 4
 K_OPTIONS = [1, 2, 3]
 # OUTPUT_DIR = f"./compressed_opt-125m_gs{GROUP_SIZE}"

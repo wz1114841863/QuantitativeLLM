@@ -6,21 +6,21 @@ from transformers import AutoModelForCausalLM, AutoConfig
 from srcs.quantizer.real_quantize import *
 from srcs.quantizer.pre_quant import get_named_linears
 from srcs.utils.save_layer_werights import load_saved_layer
-from srcs.difference.differential_encoding import (
+from srcs.deprecated.differential_encoding import (
     diff_encode_int4,
     diff_encode_uint4,
     diff_decode_int4,
     stat_diff,
     stat_diff_zp_centered,
 )
-from srcs.utils.run_lengths_calculate import compute_run_lengths
+from srcs.encoder.run_lengths_calculate import compute_run_lengths
 from srcs.utils.utils import (
     release_memory,
     save_quantized_weigths,
     save_log,
     save_json_file,
 )
-from srcs.utils.reorder import reorder_tile
+from srcs.deprecated.reorder import reorder_tile
 
 
 def analyze_diff_model(model_name, out_dir, skip_if_exist=True):

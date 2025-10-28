@@ -3,12 +3,12 @@ import torch
 
 from srcs.utils.save_layer_werights import load_saved_layer
 from srcs.quantizer.real_quantize import *
-from srcs.difference.differential_encoding import (
+from srcs.deprecated.differential_encoding import (
     diff_encode_uint4,
     stat_diff,
 )
-from srcs.utils.run_lengths_calculate import compute_run_lengths
-from srcs.utils.reorder import reorder_tile, reorder_tile_v2
+from srcs.encoder.run_lengths_calculate import compute_run_lengths
+from srcs.deprecated.reorder import reorder_tile, reorder_tile_v2
 
 """
 文件说明:
@@ -42,7 +42,7 @@ def diff_encode_indices(reverse_indices, tile_size=128):
 
 def stat_diff_idx(diff_indices, tile=128):
     """
-    完全对标你现有的 stat_diff,只是输入换成"索引差分"
+    现有的 stat_diff,只是输入换成"索引差分"
     返回:cov2, cov3, same, long4
     含义不变:
         same 高 → 大量 0 差分 → RLE/稀疏编码受益

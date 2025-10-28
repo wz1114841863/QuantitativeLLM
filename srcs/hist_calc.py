@@ -8,13 +8,7 @@ from scipy.stats import entropy
 from math import ceil, log2
 from srcs.quantizer.real_quantize import *
 from srcs.utils.save_layer_werights import load_saved_layer
-from srcs.difference.differential_encoding import (
-    diff_encode_int4,
-    diff_encode_uint4,
-    diff_decode_int4,
-    stat_diff,
-    stat_diff_zp_centered,
-)
+
 
 """
 文件说明:

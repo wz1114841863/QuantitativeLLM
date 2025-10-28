@@ -19,6 +19,7 @@ compressed_opt-125m_gs512/*
 
 results/*
 result/*
+extract_weights/*
 diff_hist/*
 symm_hist/*
 plt_figures/*

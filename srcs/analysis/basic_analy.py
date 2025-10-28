@@ -13,7 +13,9 @@ def get_basic_stats(weight):
     print("1st/99th percentile:", np.percentile(weight, [1, 99]))
 
 
-def plot_weight_distribution(weight, path="weight_distribution.png", subsample=500_000):
+def plot_weight_distribution(
+    weight, save_path="weight_distribution.png", subsample=500_000
+):
     """weight: np.ndarray, 任意 shape"""
     weight = weight.flatten()
     if weight.size > subsample:
@@ -25,9 +27,10 @@ def plot_weight_distribution(weight, path="weight_distribution.png", subsample=5
     plt.xlabel("Weight Value")
     plt.ylabel("Density")
     plt.tight_layout()
-    plt.savefig(path, dpi=300)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=300)
     plt.close()
-    print(f"Saved to {path} (used {subsample} samples)")
+    print(f"Saved to {save_path}")
 
 
 def plot_weight_heatmap(weight, path="weight_heatmap.png", max_size=400):

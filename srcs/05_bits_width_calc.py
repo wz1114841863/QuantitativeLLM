@@ -6,11 +6,11 @@ import huffman
 from collections import Counter
 from srcs.quantizer.real_quantize import *
 from srcs.utils.save_layer_werights import load_saved_layer
-from srcs.difference.differential_encoding import (
+from srcs.deprecated.differential_encoding import (
     diff_encode_uint4,
     stat_diff,
 )
-from srcs.utils.run_lengths_calculate import compute_run_lengths
+from srcs.encoder.run_lengths_calculate import compute_run_lengths
 from srcs.encoder.range_encoder import RangeCoder4Bit, RangeCoder31
 from srcs.encoder.base_encoder import *
 

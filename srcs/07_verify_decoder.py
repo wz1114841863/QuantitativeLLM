@@ -3,6 +3,12 @@ import os
 from math import ceil, log2
 from tqdm import tqdm
 
+"""
+文件说明:
+    用于验证压缩后的模型权重的正确性
+    解码, 并与原始量化权重对比
+"""
+
 K_OPTIONS = [1, 2, 3]
 
 
