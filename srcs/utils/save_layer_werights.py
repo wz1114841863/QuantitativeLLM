@@ -33,6 +33,7 @@ def save_all_linear_layers(model, model_name, save_dir):
         safe_name = name.replace(".", "_").replace("/", "_")
 
         weight = module.weight.data.cpu().numpy()
+        weight = weight.astype(np.float16, copy=False)
         weight_path = os.path.join(layers_dir, f"layer_{i:03d}_{safe_name}_weights.npy")
         np.save(weight_path, weight)
 
@@ -40,6 +41,7 @@ def save_all_linear_layers(model, model_name, save_dir):
         bias_path = None
         if module.bias is not None:
             bias = module.bias.data.cpu().numpy()
+            bias = bias.astype(np.float16, copy=False)
             bias_path = os.path.join(layers_dir, f"layer_{i:03d}_{safe_name}_bias.npy")
             np.save(bias_path, bias)
 
@@ -222,7 +224,9 @@ def save_selected_linears(
     for idx, (name, module) in enumerate(modules.items()):
         safe_name = name.replace(".", "_").replace("/", "_")
         weight_path = os.path.join(layers_dir, f"{safe_name}_weight.npy")
-        np.save(weight_path, module.weight.data.cpu().numpy())
+        weight = module.weight.data.cpu().numpy()
+        weight = weight.astype(np.float16, copy=False)
+        np.save(weight_path, weight)
 
         info = {
             "layer_name": name,
@@ -232,7 +236,9 @@ def save_selected_linears(
 
         if module.bias is not None:
             bias_path = weight_path.replace("_weight.npy", "_bias.npy")
-            np.save(bias_path, module.bias.data.cpu().numpy())
+            bias = module.bias.data.cpu().numpy()
+            bias = bias.astype(np.float16, copy=False)
+            np.save(bias_path, bias)
             info["bias_path"] = bias_path
             info["has_bias"] = True
         else:
