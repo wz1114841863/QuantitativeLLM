@@ -75,15 +75,15 @@ if __name__ == "__main__":
     ]
 
     # model_name = "facebook/opt-125m"
-    model_name = "EleutherAI/gpt-neo-2.7B"
-    # model_name = "facebook/opt-1.3b"
+    # model_name = "EleutherAI/gpt-neo-2.7B"
+    model_name = "facebook/opt-1.3b"
 
     out_dir = "./extract_weights"
     # 保存模型权重
-    # save_model_weights(model_name, out_dir, list(range(0, 41, 8)))
+    save_model_weights(model_name, out_dir)
 
     # 测试加载
-    if 1:
+    if 0:
         # model_path = "extract_weights/EleutherAI_gpt-neo-2.7B_layers"
         model_path = "extract_weights/facebook_opt-1.3b_layers"
         for i in range(10, 11):
