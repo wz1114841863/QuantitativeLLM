@@ -88,6 +88,7 @@ def group_zero_point_quantize_to_4bit(tensor, group_size=128):
     original_shape = tensor.shape
     device = tensor.device
     flattened = tensor.flatten()
+    # can be divided evenly by default
     num_groups = (flattened.numel() + group_size - 1) // group_size
 
     quantized = torch.zeros_like(flattened, dtype=torch.uint8)

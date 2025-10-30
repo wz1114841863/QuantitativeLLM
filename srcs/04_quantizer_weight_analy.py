@@ -1,26 +1,30 @@
 import os
+import time
 import torch
+import json
+import pandas as pd
+import numpy as np
 
 from typing import Optional
+from pathlib import Path
 from tqdm import tqdm
 
-from srcs.utils.save_layer_werights import load_saved_layer
-from srcs.quantizer.pseudo_quantize import (
-    pseudo_quantize_tensor,
+from srcs.quantizer.real_quantize import (
+    real_quantize_tensor,
 )
-from srcs.quantizer.real_quantize import real_quantize_tensor
-from srcs.analysis.basic_analy import (
-    get_basic_stats,
-    plot_weight_distribution,
-    plot_weight_heatmap,
-    mark_outliers,
-)
-from srcs.analysis.pseudo_quantize_analy import (
-    save_group_rmse_fig,
-    save_channel_drift_fig,
-)
+
 from srcs.analysis.real_quantize_analy import (
     check_quant_fn,
+    save_codes_ratio_figure,
+    save_weight_dist_figure,
+    save_group_code_dist,
+    save_delta_dist,
+    save_group_delta_dist,
+)
+from srcs.utils.save_layer_werights import (
+    build_index_map,
+    load_selected_layer,
+    load_saved_layer,
 )
 
 """
@@ -29,151 +33,135 @@ from srcs.analysis.real_quantize_analy import (
 """
 
 
-def pseudo_quantize_analy(
-    model_path: str,
-    layer_indices: range = range(3),
-    w_bit: int = 4,
-    zero_point: bool = False,
-    group_size: Optional[int] = 128,
-    out_dir: str = "tmp",
-    model_tag: Optional[str] = None,
-    plot_noise: bool = True,
-    plot_outlier: bool = True,
-    plot_rmse: bool = False,
-    plot_drift: bool = False,
+def analyze_one_layer(
+    layer_path,
+    layer_idx,
+    layer_name,
+    w_bit=4,
+    zero_point=True,
+    group_size=128,
+    N=4,
+    out_root=Path("quant_report"),
+    device="cpu",
 ):
-    """逐层加载保存的权重, 进行伪量化, 并分析量化后的权重分布"""
-    os.makedirs(out_dir, exist_ok=True)
-    tag = model_tag or os.path.basename(os.path.normpath(model_path))
+    """分析单层并写图 + JSON"""
+    weight, _, info = load_selected_layer(
+        layer_path, layer_name=layer_name, return_tensor=True
+    )
+    weight = weight.to(device)
 
-    for i in tqdm(layer_indices, desc="Analysing layers"):
-        weight, bias, info = load_saved_layer(model_path, layer_index=i)
-
-        quant_tensor = pseudo_quantize_tensor(
-            weight, wq_bits=w_bit, zero_point=zero_point, group_size=group_size
+    # group_size 校验
+    total_elem = weight.numel()
+    if total_elem % group_size != 0:
+        raise ValueError(
+            f"Layer {layer_name} of shape {weight.shape} with {total_elem} elements "
+            f"cannot be evenly divided into groups of size {group_size}."
         )
 
-        weight_np = weight.detach().cpu().numpy()
-        quant_np = quant_tensor.detach().cpu().numpy()
+    q, zp, scale = real_quantize_tensor(
+        weight, zero_point=zero_point, group_size=group_size, return_scale=True
+    )
+    # print("q unique:", np.unique(q))
+    # print("zp unique:", np.unique(zp))
 
-        get_basic_stats(quant_np)
-        plot_weight_distribution(
-            quant_np,
-            path=os.path.join(out_dir, f"{tag}_L{i}_W{w_bit}bit_dist.png"),
+    rmse, clip, codes = check_quant_fn(
+        lambda t, **kw: real_quantize_tensor(t, **kw),
+        weight,
+        group_size=group_size,
+        zero_point=True,
+    )
+
+    tag = f"{info['layer_name'].replace('/', '_').replace('.', '_')}"
+    out_dir = out_root / f"layer_{layer_idx:03d}_{tag}_GS{group_size}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # save_codes_ratio_figure(q.cpu().numpy(), out_dir / "code_ratio.png")
+    save_weight_dist_figure(q.cpu().numpy(), out_dir / "weight_dist.png")
+
+    num_groups = total_elem // group_size
+    q_group = q.view(num_groups, group_size)
+    zp_1d = zp.view(-1)
+    delta_group = q_group.int() - zp_1d.view(-1, 1).int()
+    # delta_group = q_group - zp_1d.view(-1, 1)
+    delta_np = delta_group.cpu().numpy().flatten()
+    save_delta_dist(delta_np, out_dir / "delta_weights_dist.png")
+
+    seed = 42
+    rng = np.random.default_rng(seed)
+    sample_gid = rng.choice(num_groups, size=min(N, num_groups), replace=False)
+    for gid in sample_gid:
+        codes_g = q_group[gid].cpu().numpy()
+        save_group_code_dist(codes_g, gid, out_dir / "group_codes")
+
+        delta_g = delta_group[gid].cpu().numpy()
+        save_group_delta_dist(
+            delta_g, int(zp_1d[gid].item()), gid, out_dir / "delta_group_codes"
         )
-        plot_weight_heatmap(
-            quant_np,
-            path=os.path.join(out_dir, f"{tag}_L{i}_W{w_bit}bit_heatmap.png"),
-        )
 
-        if plot_noise:
-            # 红色 → 量化向上偏移,蓝色 → 向下偏移.
-            # 若某一行/列颜色一致 → 该组 scale 过大/过小,后续可减小group_size或单独放大qmax
-            plot_weight_heatmap(
-                quant_np - weight_np,
-                path=os.path.join(out_dir, f"{tag}_L{i}_W{w_bit}bit_noise.png"),
-            )
-        if plot_outlier:
-            # 画出离群点位置
-            mark_outliers(
-                quant_np,
-                path=os.path.join(out_dir, f"{tag}_L{i}_W{w_bit}bit_outliers.png"),
-            )
-        if plot_rmse:
-            # 画出各组 RMSE 分布
-            save_group_rmse_fig(
-                weight_fp=weight_np,
-                weight_q=quant_np,
-                group_size=group_size or weight_np.shape[1],
-                save_path=os.path.join(out_dir, f"{tag}_L{i}_W{w_bit}bit_grp_rmse.png"),
-            )
-        if plot_drift:
-            # 画出各通道方差漂移
-            save_channel_drift_fig(
-                weight_fp=weight_np,
-                weight_q=quant_np,
-                save_path=os.path.join(
-                    out_dir, f"{tag}_L{i}_W{w_bit}bit_chnl_drift.png"
-                ),
-            )
+    summary = dict(
+        layer_name=info["layer_name"],
+        shape=list(weight.shape),
+        w_bit=w_bit,
+        zero_point=zero_point,
+        group_size=group_size,
+        RMSE=float(rmse),
+        clip_rate=float(clip),
+        codes=int(codes),
+        timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+    # print(f"[json] {out_dir}/summary.json")
+    return summary
 
 
-def real_quant_analy(
-    model_path: str,
-    layer_indices: range = range(3),
-    w_bit: int = 4,
-    zero_point: bool = False,
-    group_size: Optional[int] = None,
-    save_dir: str = "tmp",
-    tag: str = "layer",
-    plot_code_hist: bool = True,
-    plot_scale_heat: bool = True,
-    plot_clip_scatter: bool = True,
+def analyze_model(
+    model_layers_dir,
+    layer_indices=None,
+    w_bit=4,
+    zero_point=True,
+    group_size=128,
+    out_root="quant_report",
+    device="cpu",
 ):
-    """
-    对 *真实量化* 后的权重做全套体检
-    weight: FP16 权重矩阵  shape [out_ch, in_ch]
-    """
-    # os.makedirs(save_dir, exist_ok=True)
-    for i in tqdm(layer_indices, desc="Analysing layers"):
-        weight, bias, info = load_saved_layer(model_path, layer_index=i)
-        # device = weight.device
-
-        out = real_quantize_tensor(
-            weight,
+    idx2name = build_index_map(model_layers_dir)
+    layer_indices = layer_indices or range(len(idx2name))
+    dir_name = Path(model_layers_dir).name
+    model_name = dir_name.replace("_layers", "")
+    out_root = Path(out_root) / model_name.replace("/", "_")
+    all_summaries = []
+    for idx in tqdm(layer_indices, desc="Layer"):
+        summ = analyze_one_layer(
+            model_layers_dir,
+            idx,
+            idx2name[idx],
+            w_bit=w_bit,
             zero_point=zero_point,
             group_size=group_size,
-            return_scale=True,
+            out_root=out_root,
+            device=device,
         )
+        all_summaries.append(summ)
 
-        # 拿到 group-wise 参数
-        if zero_point:
-            q, zp, scale = out
-            # scale/zp 先 reshape 成 [out_ch, num_groups_per_row]
-            in_ch = weight.shape[1]
-            groups_per_row = in_ch // group_size
-            scale_2d = scale.view(-1, groups_per_row).repeat_interleave(
-                group_size, dim=1
-            )
-            zp_2d = zp.view(-1, groups_per_row).repeat_interleave(group_size, dim=1)
-            deq = (q.to(weight.dtype) - zp_2d) * scale_2d
-        else:
-            q, scale = out
-            in_ch = weight.shape[1]
-            groups_per_row = in_ch // group_size
-            scale_2d = scale.view(-1, groups_per_row).repeat_interleave(
-                group_size, dim=1
-            )
-            deq = q.to(weight.dtype) * scale_2d
-
-        rmse, clip_rate, codes = check_quant_fn(
-            lambda t, **kw: real_quantize_tensor(t, **kw, return_scale=True),
-            weight,
-            zero_point=zero_point,
-            group_size=group_size,
-        )
-        print(f"[{tag}]  RMSE={rmse:.6f}  clip={clip_rate*100:.2f}%  codes={codes}")
+    # csv_file = (
+    #     out_root / f"all_L{min(layer_indices)}-{max(layer_indices)}_GS{group_size}.csv"
+    # )
+    # pd.DataFrame(all_summaries).to_csv(csv_file, index=False)
+    # print(f"[csv] {csv_file}")
 
 
 if __name__ == "__main__":
-    model_path = "output_weights/facebook_opt-125m_layers"
-    # pseudo_quantize_analy(
-    #     model_path=model_path,
-    #     layer_indices=range(3),
-    #     w_bit=4,
-    #     zero_point=False,
-    #     group_size=None,
-    #     out_dir="tmp/quant_analysis",
-    #     model_tag="opt125m",
-    #     # plot_noise=True,
-    #     # plot_outlier=True,
-    #     plot_rmse=True,
-    #     plot_drift=True,
-    # )
-    real_quant_analy(
-        model_path=model_path,
-        layer_indices=range(3),
+    GROUP_SIZES = [
+        128,
+        256,
+        512,
+        1024,
+    ]
+    # model_path = "extract_weights/facebook_opt-125m_layers"
+    model_path = "extract_weights/facebook_opt-1.3b_layers"
+    analyze_model(
+        model_layers_dir=model_path,
+        layer_indices=range(10, 30),
         w_bit=4,
         zero_point=True,
-        group_size=128,
+        group_size=512,
     )

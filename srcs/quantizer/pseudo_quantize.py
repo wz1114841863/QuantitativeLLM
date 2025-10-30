@@ -22,7 +22,6 @@ def pseudo_quantize_model_weight(
 def pseudo_quantize_tensor(
     weight, wq_bits: int = 4, zero_point: bool = False, group_size: Optional[int] = None
 ):
-    """伪量化实现"""
     if zero_point:
         return pseudo_zero_point_quant(weight, wq_bits, group_size)
     else:
@@ -35,30 +34,18 @@ def pseudo_symm_quant(w_fp16, wq_bits: int = 4, group_size: Optional[int] = None
     if (group_size is None) or (group_size <= 0):
         w_fp16_new = w_fp16
     else:
-        K, C = w_fp16.size()  # output channel, input channel
+        K, C = w_fp16.size()
         NUM_GROUP = C // group_size
-        w_fp16_new = w_fp16.unsqueeze(-1).reshape(
-            K, NUM_GROUP, group_size
-        )  # reshape to [K, NUM_GROUP, group_size]
+        w_fp16_new = w_fp16.unsqueeze(-1).reshape(K, NUM_GROUP, group_size)
 
-    rmax = torch.amax(
-        w_fp16_new.abs(), dim=-1, keepdim=True
-    )  # find the max absolute value in each group. shape: [K, NUM_GROUP, 1]
-    qmax = 2 ** (wq_bits - 1) - 1  # qmax= 2^(wq_bits-1) - 1
+    rmax = torch.amax(w_fp16_new.abs(), dim=-1, keepdim=True)
+    qmax = 2 ** (wq_bits - 1) - 1
     qmin = -qmax
-    scale_fp = (
-        rmax / qmax
-    )  # calculate the scale factor for quantization, shape: [K, NUM_GROUP, 1]
-    scale_fp = scale_fp.clamp(
-        min=1e-5, max=1e4
-    )  # clamp the scale factor to avoid numerical issues
-    q_tensor = torch.clamp(
-        torch.round(w_fp16_new / scale_fp), min=qmin, max=qmax
-    )  # quantize the weights, shape: [K, NUM_GROUP, group_size]
+    scale_fp = rmax / qmax
+    scale_fp = scale_fp.clamp(min=1e-3, max=1e4)
+    q_tensor = torch.clamp(torch.round(w_fp16_new / scale_fp), min=qmin, max=qmax)
 
-    w_fp16_new = (
-        q_tensor * scale_fp
-    )  # dequantize the weights,shape: [K, NUM_GROUP, group_size]
+    w_fp16_new = q_tensor * scale_fp
     if (group_size is None) or (group_size <= 0):
         return w_fp16_new
     else:
@@ -71,30 +58,22 @@ def pseudo_zero_point_quant(w_fp16, wq_bits: int = 4, group_size: Optional[int] 
     if (group_size is None) or (group_size <= 0):
         w_fp16_new = w_fp16
     else:
-        K, C = w_fp16.size()  # output channel, input channel
+        K, C = w_fp16.size()
         NUM_GROUP = C // group_size
-        w_fp16_new = w_fp16.unsqueeze(-1).reshape(
-            K, NUM_GROUP, group_size
-        )  # reshape to [K, NUM_GROUP, group_size]
+        w_fp16_new = w_fp16.unsqueeze(-1).reshape(K, NUM_GROUP, group_size)
 
-    rmin = torch.amin(w_fp16_new, dim=-1, keepdim=True)  # shape: [K, NUM_GROUP, 1]
-    rmax = torch.amax(w_fp16_new, dim=-1, keepdim=True)  # shape: [K, NUM_GROUP, 1]
+    rmin = torch.amin(w_fp16_new, dim=-1, keepdim=True)
+    rmax = torch.amax(w_fp16_new, dim=-1, keepdim=True)
     qmin = 0
-    qmax = 2**wq_bits - 1  # qmax= 2^wq_bits - 1
-    scale_fp = (rmax - rmin) / (qmax - qmin)  # shape: [K, NUM_GROUP, 1]
-    scale_fp = scale_fp.clamp(
-        min=1e-5, max=1e4
-    )  # clamp the scale factor to avoid numerical issues
-    zero_point = torch.clamp(
-        torch.round(qmin - rmin / scale_fp), min=qmin, max=qmax
-    )  # shape: [K, NUM_GROUP, 1]
+    qmax = 2**wq_bits - 1
+    scale_fp = (rmax - rmin) / (qmax - qmin)
+    scale_fp = scale_fp.clamp(min=1e-3, max=1e4)
+    zero_point = torch.clamp(torch.round(-rmin / scale_fp), min=qmin, max=qmax)
     q_tensor = torch.clamp(
         torch.round(w_fp16_new / scale_fp + zero_point), min=qmin, max=qmax
-    )  # quantize the weights, shape: [K, NUM_GROUP, group_size]
+    )
 
-    w_fp16_new = (
-        q_tensor - zero_point
-    ) * scale_fp  # dequantize the weights,shape: [K, NUM_GROUP, group_size]
+    w_fp16_new = (q_tensor - zero_point) * scale_fp
     if (group_size is None) or (group_size <= 0):
         return w_fp16_new
     else:

@@ -5,12 +5,17 @@ import matplotlib.pyplot as plt
 
 def get_basic_stats(weight):
     """Compute basic statistics of a layer."""
-    print("Min:", np.min(weight))
-    print("Max:", np.max(weight))
-    print("Mean:", np.mean(weight))
-    print("Std:", np.std(weight))
-    print("Median:", np.median(weight))
-    print("1st/99th percentile:", np.percentile(weight, [1, 99]))
+    w = weight.astype(np.float32, copy=False).flatten()
+    return dict(
+        min=float(w.min()),
+        max=float(w.max()),
+        mean=float(w.mean()),
+        std=float(w.std()),
+        median=float(np.median(w)),
+        perc_1=float(np.percentile(w, 1)),
+        perc_99=float(np.percentile(w, 99)),
+        numel=int(w.size),
+    )
 
 
 def plot_weight_distribution(
@@ -21,16 +26,17 @@ def plot_weight_distribution(
     if weight.size > subsample:
         rng = np.random.default_rng(42)
         weight = rng.choice(weight, size=subsample, replace=False)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
     plt.figure(figsize=(8, 5))
     sns.histplot(weight, bins=200, kde=True, color="skyblue", stat="density")
-    plt.title("Weight Distribution")
+    plt.title(f"Weight Distribution - {save_path.stem}")
     plt.xlabel("Weight Value")
     plt.ylabel("Density")
     plt.tight_layout()
-    save_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path, dpi=300)
     plt.close()
-    print(f"Saved to {save_path}")
+    print(f"[fig] saved to {save_path}")
 
 
 def plot_weight_heatmap(weight, path="weight_heatmap.png", max_size=400):
@@ -64,7 +70,7 @@ def plot_weight_heatmap(weight, path="weight_heatmap.png", max_size=400):
     plt.tight_layout()
     plt.savefig(path, dpi=300)
     plt.close()
-    print(f"Heatmap saved to {path}  (original {h}×{w})")
+    print(f"Heatmap saved to {path}  (original {h} x {w})")
 
 
 def mark_outliers(weight, path="outlier_dots.png", thresh=3.0):
