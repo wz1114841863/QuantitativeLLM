@@ -11,9 +11,9 @@ from srcs.quantizer.real_quantize import real_quantize_tensor
     完整的模型压缩流程实现, 包括量化和Golomb-Rice编码
 """
 
-# MODEL_ID = "facebook/opt-125m"
+MODEL_ID = "facebook/opt-125m"
 # MODEL_ID = "facebook/opt-350m"
-MODEL_ID = "facebook/opt-1.3b"
+# MODEL_ID = "facebook/opt-1.3b"
 GROUP_SIZE = 512
 N_BITS = 4
 K_OPTIONS = [1, 2, 3]
