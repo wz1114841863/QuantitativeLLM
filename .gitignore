@@ -25,6 +25,7 @@ extract_weights/*
 diff_hist/*
 symm_hist/*
 plt_figures/*
+experiments/*
 *.csv
 *.png
 *.jpg

@@ -125,7 +125,7 @@ def main():
             original_weights,
             zero_point=True,
             group_size=GROUP_SIZE,
-            return_scale=128,
+            return_scale=True,
         )
         quantized_weights = quantized_weights.flatten().numpy()
         scales = scales.numpy()
