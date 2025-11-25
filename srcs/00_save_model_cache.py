@@ -8,8 +8,11 @@ from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM
     先下载几个不同的大模型用于分析, 最后再按系列下载不同尺寸的模型.
 """
 MODELS = [
+    "facebook/opt-125m",
+    "facebook/opt-1.3b",
     "facebook/opt-6.7b",
-    "decapoda-research/llama-7b-hf",
+    "huggyllama/llama-7b",
+    "huggyllama/llama-13b",
 ]
 
 
