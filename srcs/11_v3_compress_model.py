@@ -1,12 +1,44 @@
 import torch
 import numpy as np
 import os
+import shutil
 import sys
 import argparse
 from math import ceil, log2
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM
 from srcs.quantizer.real_quantize import real_quantize_tensor
+
+
+def clear_npz_files(output_dir):
+    """
+    清除所有生成的npz文件以节省空间,但保留报告文件和分布采样数据
+    """
+    npz_files = [f for f in os.listdir(output_dir) if f.endswith(".npz")]
+
+    if not npz_files:
+        print("No .npz files found to clear.")
+        return
+
+    print(f"Found {len(npz_files)} .npz files to clear...")
+
+    cleared_count = 0
+    for filename in npz_files:
+        file_path = os.path.join(output_dir, filename)
+        try:
+            os.remove(file_path)
+            cleared_count += 1
+        except Exception as e:
+            print(f"Error removing {filename}: {e}")
+
+    print(f"Successfully cleared {cleared_count} .npz files from {output_dir}")
+
+    # 检查是否还有残留文件
+    remaining_npz = [f for f in os.listdir(output_dir) if f.endswith(".npz")]
+    if remaining_npz:
+        print(f"Warning: {len(remaining_npz)} .npz files remain in directory")
+    else:
+        print("All .npz files have been successfully cleared")
 
 
 def parse_args():
@@ -316,6 +348,13 @@ def main():
 
     print(f"\nCompression complete. Artifacts saved to '{OUTPUT_DIR}'.")
     summarize_compression_results(OUTPUT_DIR)
+
+    # 添加清除npz文件的调用
+    print("\n" + "=" * 50)
+    print("Cleaning up .npz files to save space...")
+    clear_npz_files(OUTPUT_DIR)
+    print("Cleanup completed!")
+    print("=" * 50)
 
 
 if __name__ == "__main__":
