@@ -35,3 +35,5 @@ experiments/*
 __pycache__/*
 *.pyc
 *.pyo
+
+paper_experiments/*

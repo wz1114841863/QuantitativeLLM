@@ -4,7 +4,7 @@
 MODELS=(
     "facebook/opt-125m"
     "facebook/opt-1.3b"
-
+    "facebook/opt-6.7b"
     "huggyllama/llama-7b"
     "huggyllama/llama-13b")
 
@@ -19,7 +19,7 @@ for model in "${MODELS[@]}"; do
     for gs in "${COMPRESSION_GROUPS[@]}"; do
         echo "Running experiment for $model with GS=$gs..."
 
-        python ./srcs/11_v3_compress_model.py \
+        python ./srcs/12_v4_compress_model.py \
             --model_id "$model" \
             --group_size "$gs" \
             --output_base "./paper_experiments" \
